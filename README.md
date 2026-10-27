@@ -5,7 +5,7 @@ Open `index.html` directly, including via `file://`, or serve the directory with
 No dependencies, external assets, network requests or build step are needed.
 
 Cook a five-dish service. The first two batches need **6.5 cumulative seconds** in their orange target bands;
-the three finishing batches need **12 seconds** each. The quick opening introduces the controls before the
+the three finishing batches need **8 seconds** each. The quick opening introduces the controls before the
 more demanding finishing dishes. Bands narrow from **65–85 → 68–82 → 70–80 → 71–79 → 72–78 PSI**.
 Every new batch has a hotter burner and stronger surges. The gauge and progress caption show the current
 band and required cook time. Leaving the band pauses cooking progress and resets the combo; continuous
@@ -35,7 +35,7 @@ When touch is the last input, start, hints, sound controls and result screens om
 The first-vent hint stays after an Enter-only start, occupies a separate wall plaque, and hides at either result.
 Combo and batch feedback have a reserved line inside the dial, with smaller mobile text clear of the ticks.
 The hint clears the wall piping and the pod handle; the caution sign sits below the progress caption.
-Cook timers use one decimal on both sides, such as 6.5/6.5s and 12.0/12.0s.
+Cook timers use one decimal on both sides, such as 6.5/6.5s and 8.0/8.0s.
 Space release always clears the held input, even if focus moves to a button. Window blur and hiding the
 page release all keyboard and pointer inputs.
 
@@ -59,15 +59,15 @@ node .launchpad/checks/round-1/run.mjs
 
 Physics tests cover pressure, tap/hold cooling, inertia, clamps, scoring, combo, batch cooking, increasing heat,
 narrowing bands, surge warnings, victory, blowout and reset. They assert the opening batches' cook times and
-an expert completion within 55–65 seconds. Deterministic policy results:
+an expert completion within 40–50 seconds. Deterministic policy results:
 
 | Policy | Result |
 | --- | --- |
 | Idle | Blowout at 8.6s; no dishes |
 | 150 ms taps every 400 ms | Blowout at 26.8s; no dishes |
 | Seeded random tapping | Blowout at 59.4s; no dishes |
-| 450 ms decisions with 250 ms pressure anticipation | Five dishes in 91.2s |
-| 80 ms predictive expert | Five dishes in 56.4s |
+| 450 ms decisions with 250 ms pressure anticipation | Five dishes in 65.3s |
+| 80 ms predictive expert | Five dishes in 44.3s |
 
 These are scripted benchmarks, not human play measurements. UI smoke tests run both inline scripts with
 mocked Canvas, DOM and audio. They exercise keyboard and touch services, mute focus, button-focused Space

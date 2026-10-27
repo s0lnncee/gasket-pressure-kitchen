@@ -106,6 +106,7 @@ function setup(width, height, blocked = false) {
 for (const [width, height] of [[1440, 900], [390, 844], [360, 740]]) {
   const ui = setup(width, height);
   const { run, tick, text, replay, mute } = ui;
+  assert.deepEqual(Array.from(run('CONFIG.batches'), target => target.seconds), [6.5, 6.5, 8, 8, 8]);
   run('render()');
   assert.ok(text.includes(width < height ? 'HOLD OR TAP ANYWHERE TO VENT' : 'HOLD SPACE TO VENT'));
   assert.ok(text.includes('1/5'), 'burner readout includes its scale');
@@ -158,6 +159,7 @@ for (const [width, height] of [[1440, 900], [390, 844], [360, 740]]) {
   assert.equal(run('state.dishes'), 5);
   assert.equal(run('state.hintOpacity'), 0);
   const winTime = run('state.elapsed');
+  assert.ok(winTime >= 65 && winTime <= 75, 'input-driven service lasts approximately 70 seconds');
   const best = run('state.best');
   tick(1);
   assert.equal(replay.hidden, false);

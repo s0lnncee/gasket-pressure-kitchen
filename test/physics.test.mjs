@@ -163,8 +163,8 @@ function runPolicy(interval, policy) {
   }
   return { ...state, minimumPressure };
 }
-assert.deepEqual(Array.from(C.batches, target => target.seconds), [6.5, 6.5, 12, 12, 12],
-  'presentation changes preserve all batch durations');
+assert.deepEqual(Array.from(C.batches, target => target.seconds), [6.5, 6.5, 8, 8, 8],
+  'service uses the approved batch durations');
 assert.ok(C.batches[0].seconds >= 6 && C.batches[0].seconds <= 7);
 assert.ok(C.batches[1].seconds >= 6 && C.batches[1].seconds <= 7);
 let randomSeed = 0x1234;
@@ -174,7 +174,7 @@ const randomTap = () => {
 };
 const random = runPolicy(0.15, randomTap);
 assert.equal(random.phase, 'gameover', 'random taps cannot win the service');
-assert.ok(random.dishes < C.batches.length);
+assert.equal(random.dishes, 0);
 const idle = runPolicy(1, () => false);
 const tapping = runPolicy(C.step, s => s.elapsed % 0.4 < 0.15);
 const reasonable = runPolicy(0.45, (s, held) => {
@@ -189,14 +189,15 @@ assert.ok(tapping.elapsed > idle.elapsed * 2, 'repeated taps extend the initial 
 assert.ok(reasonable.elapsed > idle.elapsed * 4, 'ordinary reactions substantially outperform idle play');
 assert.ok(reasonable.score > idle.score * 3);
 assert.equal(reasonable.phase, 'victory', 'an ordinary player can finish the service');
-assert.ok(reasonable.elapsed >= 60 && reasonable.elapsed <= 120, 'ordinary win takes a realistic 60–120 seconds');
+assert.ok(reasonable.elapsed >= 60 && reasonable.elapsed <= 70, 'ordinary service lasts approximately 65 seconds');
 assert.equal(expert.phase, 'victory', 'expert anticipation can win');
 assert.equal(expert.dishes, C.batches.length);
-assert.ok(expert.elapsed >= 55 && expert.elapsed <= 65, 'expert service lasts approximately one minute');
+assert.ok(expert.elapsed >= 40 && expert.elapsed <= 50, 'expert service lasts approximately 45 seconds');
 assert.ok(expert.score > reasonable.score, 'anticipation rewards zone control');
 assert.equal(idle.phase, 'gameover');
+assert.equal(idle.dishes, 0);
 assert.equal(tapping.phase, 'gameover', 'unthinking repetitive taps do not win');
-assert.ok(tapping.dishes < C.batches.length);
+assert.equal(tapping.dishes, 0);
 const held = runPolicy(1, () => true);
 assert.equal(held.phase, 'gameover', 'rising heat prevents endless full-vent runs');
 console.log('Physics checks passed: rise, venting, inertia, clamps, scoring, combo, batches, narrowing, '

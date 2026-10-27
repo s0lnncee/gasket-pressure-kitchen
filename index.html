@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0D0908">
+<link rel="icon" href="data:,">
+<title>Gasket's Pressure Kitchen</title>
+<style>
+:root { color-scheme: dark; background: #0D0908; color: #F3EEE9; font-family: monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+#replay { position: fixed; left: 50%; transform: translateX(-50%); padding: 15px 34px; border: 1px solid #FFB35C; border-radius: 3px; background: #F05A18; color: #0D0908; font: bold 17px monospace; cursor: pointer; }
+#replay:hover { background: #FFB35C; }
+#replay:focus-visible { outline: 3px solid #F3EEE9; outline-offset: 5px; }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+</style>
+</head>
+<body>
+<canvas id="kitchen" tabindex="0" aria-label="Gasket's Pressure Kitchen. Hold Space or hold the vent lever to lower pressure. Keep 65 to 85 PSI to score; 100 PSI causes a blowout." aria-describedby="instructions"></canvas>
+<p id="instructions" class="sr-only">Press Space or Enter to start. Hold Space or the lever to vent. Release to build pressure. At game over press Space, Enter, or Play again.</p>
+<p id="announcement" class="sr-only" aria-live="polite"></p>
+<button id="replay" hidden>Play again</button>
+<script>
+'use strict';
+// CONFIG: all gameplay values and scene geometry live here, in logical units.
+const CONFIG = {
+  maxPSI: 100, zoneLow: 65, zoneHigh: 85, warningPSI: 90, initialPSI: 42,
+  heatBase: 8, heatRamp: .105, heatCap: 21, ventForce: 37,
+  pressureResponse: 2.7, spring: 100, damping: 19,
+  surgeEvery: 4, surgeDuration: 1.7, surgeForce: 3.8,
+  pointsPerSecond: 100, comboSeconds: 3, comboMax: 5,
+  step: 1 / 120, maxFrame: .1, particleLimit: 220, storageKey: 'gasket-best-v1',
+  colors: { bg: '#0D0908', dark: '#140D0B', text: '#F3EEE9', orange: '#F05A18',
+    amber: '#FFB35C', red: '#F04426', steel: '#59483F', rim: '#9C7B62',
+    panel: '#241A15', seam: '#35261E', muted: '#BB9D86', black: '#090605' },
+  layout: {
+    landscape: { w: 1440, h: 900, podX: .43, podY: .57, leverX: .765, leverY: .71,
+      ratX: .865, ratY: .635, headerY: .065, footerY: .92, machineScale: 1 },
+    portrait: { w: 900, h: 1400, podX: .49, podY: .44, leverX: .64, leverY: .79,
+      ratX: .82, ratY: .75, headerY: .045, footerY: .94, machineScale: 1.05 },
+    pod: { w: 490, h: 490, radius: 78, gaugeY: -35, gaugeR: 169, valveX: 210, valveY: -270 },
+    lever: { w: 130, h: 190, pivotY: 22, arm: 145, travel: 1.03, rest: -.5, hitW: 180, hitH: 290 },
+    gauge: { start: Math.PI * .75, sweep: Math.PI * 1.5, tickCount: 50 },
+    overlay: { w: 620, h: 440, buttonY: 98 },
+    room: { columns: 12, rows: 7, pipeInset: .035, floorY: .87, sideGaugeX: .11, sideGaugeY: .43 }
+  }
+};
+// Static local geometry for the shape-drawn chef (scaled by the scene's unit).
+const CHEF = {
+  tail: [[40, 101], [79, 126], [85, 164], [59, 181], [40, 168]],
+  upperArm: [[-35, 35], [-88, 48], [-120, 8]], elbow: [-88, 48], wrist: [-120, 8],
+  body: [
+    ['box', -41, 95, 30, 92, 10, 'steel', 'black', 4],
+    ['box', 12, 95, 30, 92, 10, 'steel', 'black', 4],
+    ['box', -58, 175, 51, 24, 8, 'black', 'rim', 2],
+    ['box', 7, 175, 51, 24, 8, 'black', 'rim', 2],
+    ['box', -50, 13, 100, 108, 23, 'orange', 'black', 5],
+    ['box', -32, 35, 65, 89, 7, 'text', 'rim', 3],
+    ['box', -20, 74, 41, 28, 4, 'panel']
+  ],
+  head: [
+    ['disc', -30, -73, 31, 'steel', 'black', 5], ['disc', -30, -73, 18, 'orange', 'rim', 2],
+    ['disc', 39, -72, 27, 'steel', 'black', 5], ['disc', 39, -72, 14, 'orange'],
+    ['box', -50, -77, 97, 91, 33, 'steel', 'black', 5],
+    ['box', -66, -35, 61, 35, 15, 'rim', 'black', 4], ['disc', -71, -25, 10, 'black', 'amber', 2],
+    ['box', -35, -60, 32, 15, 4, 'black'], ['disc', -25, -53, 5, 'amber']
+  ],
+  whiskers: [[[-59, -26], [-86, -40]], [[-59, -21], [-91, -23]]],
+  mouth: [[-51, -15], [-13, -10]],
+  hat: [
+    ['box', -41, -109, 76, 35, 6, 'text', 'rim', 3],
+    ['disc', -28, -111, 24, 'text', 'rim', 2], ['disc', 0, -124, 29, 'text', 'rim', 2],
+    ['disc', 28, -111, 23, 'text', 'rim', 2], ['box', -42, -100, 79, 24, 4, 'text', 'rim', 2]
+  ],
+  hatSeam: [[-26, -88], [21, -88]], badge: { x: 0, y: 89, font: 21 }, neck: { x: 0, y: 22, r: 6 }
+};
+const C = CONFIG.colors;
+const canvas = document.getElementById('kitchen');
+const ctx = canvas.getContext('2d');
+const replay = document.getElementById('replay');
+const announcement = document.getElementById('announcement');
+const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
+let reducedMotion = motionQuery.matches;
+motionQuery.addEventListener('change', event => { reducedMotion = event.matches; });
+let view, scene, accumulator = 0, previousTime = 0;
+const input = { space: false, pointers: new Set() };
+
+// STATE
+function readBest() {
+  try {
+    const best = Number(localStorage.getItem(CONFIG.storageKey));
+    return Number.isFinite(best) ? Math.max(0, Math.floor(best)) : 0;
+  }
+  catch { return 0; }
+}
+function createState(best = readBest()) {
+  return { phase: 'ready', pressure: CONFIG.initialPSI, velocity: 0, heat: CONFIG.heatBase,
+    elapsed: 0, clock: 0, score: 0, best, combo: 1, zoneTime: 0, inZone: false,
+    lever: 0, leverVelocity: 0, surge: 0, nextSurge: CONFIG.surgeEvery,
+    particles: [], emission: 0, blowoutTime: 0, flash: 0 };
+}
+let state = createState();
+function resetState() {
+  state = createState(state.best);
+  input.space = false;
+  input.pointers.clear();
+  replay.hidden = true;
+  announcement.textContent = 'New batch. Hold Space or the lever to vent.';
+}
+function startCooking() {
+  if (state.phase !== 'ready') return;
+  state.phase = 'cooking';
+  announcement.textContent = 'Cooking. Keep pressure between 65 and 85 PSI.';
+}
+function blowout() {
+  state.phase = 'gameover';
+  state.pressure = CONFIG.maxPSI;
+  state.flash = 1;
+  state.best = Math.max(state.best, Math.floor(state.score));
+  try { localStorage.setItem(CONFIG.storageKey, String(state.best)); } catch { /* Storage is optional. */ }
+  emitSteam(95, true);
+  replay.hidden = false;
+  announcement.textContent = `Valve blowout. Final score ${Math.floor(state.score)}. Best ${state.best}. Play again.`;
+  positionReplay();
+}
+
+// PHYSICS: fixed-step spring lever and damped pressure velocity.
+function isVenting() { return input.space || input.pointers.size > 0; }
+function updateLever(dt) {
+  const target = state.phase === 'cooking' && isVenting() ? 1 : 0;
+  state.leverVelocity += ((target - state.lever) * CONFIG.spring - state.leverVelocity * CONFIG.damping) * dt;
+  state.lever = Math.max(0, Math.min(1, state.lever + state.leverVelocity * dt));
+}
+function updatePressure(dt) {
+  state.elapsed += dt;
+  state.heat = Math.min(CONFIG.heatCap, CONFIG.heatBase + state.elapsed * CONFIG.heatRamp);
+  if (state.elapsed >= state.nextSurge) {
+    state.surge = CONFIG.surgeDuration;
+    state.nextSurge = state.elapsed + CONFIG.surgeEvery + Math.random() * 3;
+  }
+  state.surge = Math.max(0, state.surge - dt);
+  const surge = Math.sin(state.surge / CONFIG.surgeDuration * Math.PI) * CONFIG.surgeForce;
+  const targetVelocity = state.heat + surge - state.lever * CONFIG.ventForce;
+  state.velocity += (targetVelocity - state.velocity) * CONFIG.pressureResponse * dt;
+  state.pressure = Math.max(0, state.pressure + state.velocity * dt);
+  if (state.pressure === 0) state.velocity = Math.max(0, state.velocity);
+  updateScore(dt);
+  if (state.pressure >= CONFIG.maxPSI) blowout();
+}
+function updateScore(dt) {
+  state.inZone = state.pressure >= CONFIG.zoneLow && state.pressure <= CONFIG.zoneHigh;
+  state.zoneTime = state.inZone ? state.zoneTime + dt : 0;
+  state.combo = Math.min(CONFIG.comboMax, 1 + Math.floor(state.zoneTime / CONFIG.comboSeconds));
+  if (state.inZone) state.score += CONFIG.pointsPerSecond * state.combo * dt;
+}
+function emitSteam(count, burst = false) {
+  for (let i = 0; i < count && state.particles.length < CONFIG.particleLimit; i++) {
+    const life = .6 + Math.random() * 1.2;
+    state.particles.push({ x: 0, y: 0, vx: (Math.random() - .2) * (burst ? 240 : 100),
+      vy: -70 - Math.random() * (burst ? 300 : 130), life, maxLife: life,
+      radius: 5 + Math.random() * (burst ? 22 : 10) });
+  }
+}
+function updateSteam(dt) {
+  if (state.phase === 'cooking' && state.lever > .1) {
+    state.emission += dt * state.lever * 55;
+    const count = Math.floor(state.emission);
+    state.emission -= count;
+    emitSteam(count);
+  }
+  for (const p of state.particles) {
+    p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= Math.exp(-dt); p.radius += dt * 14;
+  }
+  state.particles = state.particles.filter(p => p.life > 0);
+}
+function update(dt) {
+  state.clock += dt;
+  updateLever(dt);
+  if (state.phase === 'cooking') updatePressure(dt);
+  if (state.phase === 'gameover') state.blowoutTime += dt;
+  state.flash = Math.max(0, state.flash - dt * 2.5);
+  updateSteam(dt);
+}
+
+// INPUT: independent sources avoid stuck keys or a pointer overriding Space.
+function activate() {
+  if (state.phase === 'gameover') resetState();
+  startCooking();
+}
+function keydown(event) {
+  if (event.code !== 'Space' && event.code !== 'Enter') return;
+  event.preventDefault();
+  if (event.repeat) return;
+  activate();
+  if (event.code === 'Space') input.space = true;
+}
+function keyup(event) {
+  if (event.code === 'Space') { event.preventDefault(); input.space = false; }
+}
+function pointerPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: (event.clientX - rect.left - view.ox) / view.scale,
+    y: (event.clientY - rect.top - view.oy) / view.scale };
+}
+function hitsLever(point) {
+  const g = CONFIG.layout.lever;
+  return Math.abs(point.x - scene.leverX) < g.hitW * scene.unit / 2 &&
+    Math.abs(point.y - scene.leverY + g.arm * scene.unit / 3) < g.hitH * scene.unit / 2;
+}
+function pointerdown(event) {
+  if (event.button !== 0 || !hitsLever(pointerPoint(event)) || state.phase === 'gameover') return;
+  event.preventDefault();
+  startCooking();
+  input.pointers.add(event.pointerId);
+  canvas.setPointerCapture(event.pointerId);
+}
+function releasePointer(event) { input.pointers.delete(event.pointerId); }
+function releaseAll() { input.space = false; input.pointers.clear(); }
+function bindInput() {
+  window.addEventListener('keydown', keydown);
+  window.addEventListener('keyup', keyup);
+  canvas.addEventListener('pointerdown', pointerdown);
+  canvas.addEventListener('pointerup', releasePointer);
+  canvas.addEventListener('pointercancel', releasePointer);
+  canvas.addEventListener('lostpointercapture', releasePointer);
+  canvas.addEventListener('pointermove', event => {
+    canvas.style.cursor = hitsLever(pointerPoint(event)) ? 'grab' : 'default';
+  });
+  window.addEventListener('blur', releaseAll);
+  document.addEventListener('visibilitychange', () => { releaseAll(); accumulator = 0; previousTime = 0; });
+  replay.addEventListener('click', () => { resetState(); startCooking(); canvas.focus(); });
+}
+
+// LAYOUT AND DRAWING PRIMITIVES: scene coordinates scale uniformly with the viewport.
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight, dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  const layout = w / h < .9 ? CONFIG.layout.portrait : CONFIG.layout.landscape;
+  const scale = Math.min(w / layout.w, h / layout.h);
+  view = { w, h, dpr, scale, ox: 0, oy: 0 };
+  scene = { ...layout, w: w / scale, h: h / scale,
+    unit: layout.machineScale, portrait: layout === CONFIG.layout.portrait };
+  for (const key of ['podX', 'leverX', 'ratX']) scene[key] *= scene.w;
+  for (const key of ['podY', 'leverY', 'ratY', 'headerY', 'footerY']) scene[key] *= scene.h;
+  positionReplay();
+}
+function positionReplay() {
+  if (!view) return;
+  replay.style.top = `${view.oy + (scene.h / 2 + CONFIG.layout.overlay.buttonY) * view.scale}px`;
+  replay.style.fontSize = `${Math.max(14, 17 * view.scale)}px`;
+  replay.style.padding = `${Math.max(12, 15 * view.scale)}px ${Math.max(25, 34 * view.scale)}px`;
+}
+function rounded(x, y, w, h, r, fill, stroke, lineWidth = 2) {
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.lineWidth = lineWidth; ctx.strokeStyle = stroke; ctx.stroke(); }
+}
+function circle(x, y, r, fill, stroke, lineWidth = 2) {
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.lineWidth = lineWidth; ctx.strokeStyle = stroke; ctx.stroke(); }
+}
+function line(points, color, width = 2) {
+  ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+}
+function text(label, x, y, size = 16, color = C.text, align = 'left', weight = 'normal') {
+  ctx.font = `${weight} ${size}px monospace`; ctx.fillStyle = color;
+  ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(label, x, y);
+}
+function local(x, y, scale, draw) { ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale); draw(); ctx.restore(); }
+function rivet(x, y, r = 5) {
+  circle(x, y, r, C.rim, C.black); line([[x - r / 2, y], [x + r / 2, y]], C.panel, 1.5);
+}
+function pressureAngle(psi) { return CONFIG.layout.gauge.start + psi / CONFIG.maxPSI * CONFIG.layout.gauge.sweep; }
+function arc(radius, start, end, color, width) {
+  ctx.beginPath(); ctx.arc(0, 0, radius, start, end); ctx.lineWidth = width; ctx.strokeStyle = color; ctx.stroke();
+}
+
+// ROOM: architectural piping, wall plates, lamps and floor reflections.
+function drawRoom() {
+  const { w, h } = scene, room = CONFIG.layout.room;
+  const light = ctx.createRadialGradient(w * .46, h * .48, 0, w * .46, h * .48, w * .75);
+  light.addColorStop(0, '#382016'); light.addColorStop(1, C.bg);
+  ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
+  for (let i = 1; i < room.columns; i++) {
+    const x = w * i / room.columns;
+    line([[x, h * .22], [x, h * room.floorY]], C.seam, 1);
+    for (let j = 2; j < room.rows; j++) rivet(x, h * j / room.rows, 2.5);
+  }
+  const inset = w * room.pipeInset, top = h * .235, bottom = h * .80;
+  const pipe = [[inset, bottom], [inset, top], [w * .28, top], [w * .28, h * .34]];
+  line(pipe, C.black, 32); line(pipe, C.steel, 24); line(pipe, C.rim, 3);
+  const rightPipe = [[w * .97, h * .24], [w * .97, bottom], [w * .69, bottom]];
+  line(rightPipe, C.black, 38); line(rightPipe, C.seam, 29); line(rightPipe, C.rim, 2);
+  for (let i = 0; i < 5; i++) drawPipeCollar(inset, top + (bottom - top) * i / 5);
+  rounded(0, h * room.floorY, w, h * (1 - room.floorY), 0, C.dark, C.steel);
+  for (let i = 0; i < room.columns; i++) line([[w / 2, h * room.floorY], [w * i / 6, h]], C.seam);
+  drawWallInstruments();
+  drawAmbientSteam();
+}
+function drawPipeCollar(x, y) {
+  rounded(x - 22, y - 7, 44, 14, 2, C.steel, C.black);
+  rivet(x - 16, y, 3); rivet(x + 16, y, 3);
+}
+function drawWallInstruments() {
+  const { w, h, portrait } = scene;
+  const x = w * (portrait ? .12 : .12), y = h * (portrait ? .70 : .47);
+  rounded(x - 65, y - 110, 130, 235, 8, C.panel, C.steel);
+  local(x, y - 35, .35, () => drawDial(110, 30 + Math.sin(state.clock) * 6, false));
+  text('HEAT / 04', x, y + 30, 12, C.muted, 'center');
+  for (let i = 0; i < 4; i++) rounded(x - 42, y + 54 + i * 13, 84, 5, 1, i < 3 ? C.orange : C.seam);
+  const ventX = w * .83, ventY = h * .28;
+  rounded(ventX - 80, ventY - 35, 160, 80, 5, C.dark, C.steel);
+  for (let i = 0; i < 6; i++) line([[ventX - 62, ventY - 20 + i * 11], [ventX + 62, ventY - 20 + i * 11]], C.seam, 5);
+  text('EXHAUST', ventX, ventY + 67, 12, C.muted, 'center');
+}
+function drawAmbientSteam() {
+  const { w, h } = scene;
+  ctx.save();
+  for (let i = 0; i < 5; i++) {
+    const drift = reducedMotion ? i / 5 : (state.clock * .025 + i / 5) % 1;
+    ctx.globalAlpha = Math.sin(drift * Math.PI) * .045;
+    ctx.beginPath(); ctx.ellipse(w * (.12 + i * .19), h * (.9 - drift * .3), w * .08, h * .025, -.2, 0, Math.PI * 2);
+    ctx.fillStyle = C.text; ctx.fill();
+  }
+  ctx.restore();
+}
+
+// POD
+function drawPod() {
+  const g = CONFIG.layout.pod;
+  const danger = state.pressure >= CONFIG.warningPSI && state.phase === 'cooking';
+  const shake = danger && !reducedMotion ? Math.sin(state.clock * 65) * 2.4 : 0;
+  local(scene.podX + shake, scene.podY, scene.unit, () => {
+    drawPodPlumbing();
+    rounded(-g.w / 2 + 35, g.h / 2 - 40, 85, 65, 8, C.steel, C.black, 5);
+    rounded(g.w / 2 - 120, g.h / 2 - 40, 85, 65, 8, C.steel, C.black, 5);
+    const metal = ctx.createLinearGradient(-g.w / 2, 0, g.w / 2, 0);
+    metal.addColorStop(0, C.panel); metal.addColorStop(.4, '#675043'); metal.addColorStop(1, C.panel);
+    rounded(-g.w / 2, -g.h / 2, g.w, g.h, g.radius, metal, C.black, 12);
+    rounded(-g.w / 2 + 12, -g.h / 2 + 12, g.w - 24, g.h - 24, g.radius - 6, null, C.rim, 2);
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) rivet(sx * (g.w / 2 - 40), sy * (g.h / 2 - 55), 7);
+    drawFurnace();
+    drawGauge();
+    drawWarningLamp(danger);
+    rounded(-91, g.h / 2 - 54, 182, 27, 3, C.dark, C.rim);
+    text('GASKET / UNIT 01', 0, g.h / 2 - 40, 13, C.amber, 'center');
+  });
+}
+function drawPodPlumbing() {
+  const g = CONFIG.layout.pod;
+  line([[-g.w / 2, 30], [-g.w / 2 - 55, 30], [-g.w / 2 - 55, 185], [-g.w / 2, 185]], C.black, 44);
+  line([[-g.w / 2, 30], [-g.w / 2 - 55, 30], [-g.w / 2 - 55, 185], [-g.w / 2, 185]], C.steel, 28);
+  line([[g.w / 2 - 70, -g.h / 2], [g.valveX - 30, g.valveY], [g.valveX, g.valveY]], C.black, 38);
+  line([[g.w / 2 - 70, -g.h / 2], [g.valveX - 30, g.valveY], [g.valveX, g.valveY]], C.rim, 25);
+  const lift = state.phase === 'gameover' ? -Math.min(150, state.blowoutTime * 280) : -state.lever * 8;
+  rounded(g.valveX - 18, g.valveY - 18 + lift, 42, 12, 3, C.orange, C.amber);
+}
+function drawFurnace() {
+  const g = CONFIG.layout.pod, y = g.h * .28;
+  rounded(-g.w * .35, y - 22, g.w * .7, 58, 14, C.black, C.rim, 3);
+  ctx.save(); ctx.shadowColor = C.orange; ctx.shadowBlur = 17;
+  for (let i = 0; i < 11; i++) {
+    const flicker = reducedMotion ? .7 : .7 + Math.sin(state.clock * 5 + i * 2) * .25;
+    rounded(-g.w * .31 + i * g.w * .059, y - 13, g.w * .035, 40 * flicker, 4, i % 2 ? C.amber : C.orange);
+  }
+  ctx.restore();
+}
+function drawWarningLamp(danger) {
+  const g = CONFIG.layout.pod, on = danger && Math.sin(state.clock * 12) > 0;
+  const x = -g.w / 2 + 38, y = -g.h / 2 + 110;
+  circle(x, y, 13, C.black, C.rim);
+  ctx.save(); ctx.shadowColor = C.red; ctx.shadowBlur = on ? 26 : 0;
+  circle(x, y, 8, on ? C.red : C.seam); ctx.restore();
+}
+
+// GAUGE: calibrated 270 degree dial; target arc is exactly 65–85 PSI.
+function drawGauge() {
+  const g = CONFIG.layout.pod;
+  local(0, g.gaugeY, 1, () => drawDial(g.gaugeR, state.pressure, true));
+}
+function drawDial(r, psi, main) {
+  const g = CONFIG.layout.gauge;
+  circle(0, 0, r + 12, C.black, C.rim, 4);
+  circle(0, 0, r, C.dark, C.steel, 8);
+  arc(r * .79, g.start, g.start + g.sweep, C.seam, r * .105);
+  arc(r * .79, pressureAngle(CONFIG.zoneLow), pressureAngle(CONFIG.zoneHigh), C.orange, r * .105);
+  arc(r * .79, pressureAngle(CONFIG.warningPSI), pressureAngle(CONFIG.maxPSI), C.red, r * .055);
+  drawDialTicks(r);
+  text(main ? 'POD PRESSURE' : 'THERMAL', 0, -r * .34, r * .075, C.muted, 'center');
+  text(`${psi.toFixed(0).padStart(2, '0')}`, 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
+  text('PSI', 0, r * .60, r * .085, C.muted, 'center');
+  drawNeedle(r, psi, main);
+  if (main) text('65 — 85', 0, r * .87, r * .08, C.amber, 'center');
+}
+function drawDialTicks(r) {
+  const g = CONFIG.layout.gauge;
+  for (let i = 0; i <= g.tickCount; i++) {
+    const psi = i / g.tickCount * CONFIG.maxPSI, a = pressureAngle(psi), major = i % 5 === 0;
+    const outer = r * .9, inner = r * (major ? .79 : .85);
+    line([[Math.cos(a) * inner, Math.sin(a) * inner], [Math.cos(a) * outer, Math.sin(a) * outer]], C.muted, major ? 2 : 1);
+    if (major) text(String(psi), Math.cos(a) * r * .66, Math.sin(a) * r * .66, r * .072, C.text, 'center');
+  }
+}
+function drawNeedle(r, psi, main) {
+  const a = pressureAngle(psi);
+  ctx.save(); ctx.rotate(a);
+  ctx.shadowColor = main && state.pressure >= CONFIG.warningPSI ? C.red : C.orange;
+  ctx.shadowBlur = main ? (state.inZone ? 20 : 9) : 0;
+  ctx.beginPath(); ctx.moveTo(-r * .14, -r * .026); ctx.lineTo(r * .75, 0);
+  ctx.lineTo(-r * .14, r * .026); ctx.closePath(); ctx.fillStyle = C.amber; ctx.fill();
+  ctx.restore(); circle(0, 0, r * .075, C.orange, C.amber, 3);
+}
+
+// GASKET: a canvas-built robot rat chef, reaching toward the lever.
+function drawGasket() {
+  local(scene.ratX, scene.ratY, scene.unit, () => {
+    drawRatBody();
+    line(CHEF.upperArm, C.black, 24); line(CHEF.upperArm, C.rim, 14);
+    circle(...CHEF.elbow, 11, C.steel, C.amber);
+    const handX = (scene.leverX - scene.ratX) / scene.unit + leverTip().x;
+    const handY = (scene.leverY - scene.ratY) / scene.unit + leverTip().y;
+    line([CHEF.wrist, [handX, handY]], C.steel, 12);
+    circle(handX, handY, 12, C.rim, C.black, 3);
+    drawArtwork(CHEF.head);
+    line(CHEF.mouth, C.black, 3);
+    CHEF.whiskers.forEach(points => line(points, C.muted));
+    drawChefHat();
+  });
+}
+function drawArtwork(shapes) {
+  for (const [kind, ...args] of shapes) {
+    const colorIndex = kind === 'box' ? 5 : 3;
+    args[colorIndex] = C[args[colorIndex]];
+    args[colorIndex + 1] = C[args[colorIndex + 1]];
+    if (kind === 'box') rounded(...args); else circle(...args);
+  }
+}
+function drawRatBody() {
+  line(CHEF.tail, C.black, 14); line(CHEF.tail, C.rim, 7);
+  drawArtwork(CHEF.body);
+  const badge = CHEF.badge, neck = CHEF.neck;
+  text('G', badge.x, badge.y, badge.font, C.amber, 'center', 'bold');
+  rivet(neck.x, neck.y, neck.r);
+}
+function drawChefHat() {
+  drawArtwork(CHEF.hat);
+  line(CHEF.hatSeam, C.muted, 2);
+}
+
+// LEVER
+function leverTip() {
+  const g = CONFIG.layout.lever, a = g.rest + state.lever * g.travel;
+  return { x: Math.sin(a) * g.arm, y: g.pivotY - Math.cos(a) * g.arm };
+}
+function drawLever() {
+  const g = CONFIG.layout.lever;
+  local(scene.leverX, scene.leverY, scene.unit, () => {
+    rounded(-g.w / 2, -g.h / 2, g.w, g.h, 12, C.black, C.steel, 4);
+    for (const side of [-1, 1]) rivet(side * g.w * .36, g.h * .39, 5);
+    arcLeverTrack(g);
+    const tip = leverTip();
+    line([[0, g.pivotY], [tip.x, tip.y]], C.black, 22);
+    line([[0, g.pivotY], [tip.x, tip.y]], C.rim, 12);
+    circle(0, g.pivotY, 21, C.steel, C.rim, 3); rivet(0, g.pivotY, 9);
+    rounded(tip.x - 36, tip.y - 14, 72, 28, 10, isVenting() ? C.amber : C.orange, C.black, 4);
+    text(state.lever > .5 ? 'VENTING' : 'HOLD TO VENT', 0, g.h / 2 + 27, 14, C.amber, 'center', 'bold');
+    text('[ SPACE ]', 0, g.h / 2 + 51, 13, C.muted, 'center');
+  });
+}
+function arcLeverTrack(g) {
+  ctx.save(); ctx.translate(0, g.pivotY);
+  arc(g.arm * .66, -Math.PI / 2 + g.rest, -Math.PI / 2 + g.rest + g.travel, C.orange, 4);
+  ctx.restore();
+}
+function drawSteam() {
+  const g = CONFIG.layout.pod;
+  local(scene.podX + g.valveX * scene.unit, scene.podY + g.valveY * scene.unit, scene.unit, () => {
+    for (const p of state.particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife) * .46;
+      circle(p.x, p.y, p.radius, C.text);
+    }
+    ctx.globalAlpha = 1;
+  });
+}
+
+// HUD AND PHASE OVERLAYS
+function drawHUD() {
+  drawHeader();
+  const { w, h, footerY, portrait } = scene;
+  const bandY = portrait ? h * .164 : h * .23;
+  const bandX = portrait ? w * .5 : w * .43;
+  const warning = state.pressure >= CONFIG.warningPSI && state.phase === 'cooking';
+  let label = state.phase === 'ready' ? 'AWAITING CHEF · PRESS SPACE TO START' : 'BUILD PRESSURE · TARGET 65–85 PSI';
+  if (state.inZone && state.phase === 'cooking') label = `IN ZONE ×${state.combo}  /  +${CONFIG.pointsPerSecond * state.combo} PTS/SEC`;
+  if (warning) label = Math.sin(state.clock * 12) > 0 ? '! CRITICAL PRESSURE · VENT NOW !' : '! VALVE OVERLOAD · HOLD SPACE !';
+  if (state.phase === 'gameover') label = 'BATCH LOST · VALVE BLOWOUT';
+  rounded(bandX - 255, bandY - 21, 510, 42, 4, C.dark, warning ? C.red : C.orange);
+  text(label, bandX, bandY, 15, warning ? C.red : C.amber, 'center', 'bold');
+  if (state.inZone && state.phase === 'cooking') {
+    const progress = state.combo === CONFIG.comboMax ? 1 : (state.zoneTime % CONFIG.comboSeconds) / CONFIG.comboSeconds;
+    rounded(bandX - 250, bandY + 27, 500, 3, 0, C.seam);
+    rounded(bandX - 250, bandY + 27, 500 * progress, 3, 0, C.orange);
+  }
+  text('Hold SPACE or the lever to vent', w * .5, footerY, portrait ? 22 : 20, C.text, 'center');
+  text('RELEASE TO BUILD PRESSURE  /  100 PSI = BLOWOUT', w * .5, footerY + 33, portrait ? 14 : 13, C.muted, 'center');
+}
+function drawHeader() {
+  const { w, headerY, portrait } = scene, left = w * .055;
+  text('GASKET’S', left, headerY, portrait ? 22 : 19, C.amber, 'left', 'bold');
+  text('PRESSURE KITCHEN', left, headerY + 39, portrait ? 38 : 42, C.text, 'left', 'bold');
+  text('A LITTLE HEAT. A LOT OF NERVE.', left, headerY + 76, 12, C.muted);
+  const sx = w * (portrait ? .70 : .79), sy = headerY + 8;
+  text('BATCH SCORE', sx, sy, 12, C.amber);
+  text(Math.floor(state.score).toString().padStart(6, '0'), sx, sy + 36, portrait ? 34 : 39, C.text, 'left', 'bold');
+  text(`BEST ${state.best.toString().padStart(6, '0')}`, sx, sy + 71, 12, C.muted);
+  line([[left, headerY + 106], [w * .945, headerY + 106]], C.steel);
+  if (!portrait) drawHeatReadout();
+}
+function drawHeatReadout() {
+  const x = scene.w * .79, y = scene.h * .385;
+  text('BOILER STATUS', x, y, 12, C.muted, 'center');
+  text(state.phase === 'cooking' ? '● FIRED UP' : state.phase === 'ready' ? '● STANDBY' : '● OFFLINE', x, y + 27, 17, C.orange, 'center', 'bold');
+  text(`HEAT ${Math.round(state.heat / CONFIG.heatBase * 100)}%  /  ${state.elapsed.toFixed(1)}s`, x, y + 54, 12, C.amber, 'center');
+}
+function drawGameOver() {
+  if (state.phase !== 'gameover') return;
+  const g = CONFIG.layout.overlay, x = scene.w / 2, y = scene.h / 2;
+  ctx.fillStyle = 'rgba(13,9,8,.84)'; ctx.fillRect(0, 0, scene.w, scene.h);
+  rounded(x - g.w / 2, y - g.h / 2, g.w, g.h, 10, C.dark, C.orange, 2);
+  text('!  VALVE BLOWOUT  !', x, y - 155, 18, C.orange, 'center', 'bold');
+  text('GAME OVER', x, y - 97, 52, C.text, 'center', 'bold');
+  text('Too much heat in the kitchen.', x, y - 48, 17, C.muted, 'center');
+  text('FINAL SCORE', x - 125, y + 4, 13, C.amber, 'center');
+  text('PERSONAL BEST', x + 125, y + 4, 13, C.amber, 'center');
+  text(Math.floor(state.score).toString().padStart(6, '0'), x - 125, y + 43, 33, C.text, 'center', 'bold');
+  text(state.best.toString().padStart(6, '0'), x + 125, y + 43, 33, C.text, 'center', 'bold');
+  if (!scene.portrait) text('or press SPACE / ENTER', x, y + 190, 13, C.muted, 'center');
+}
+function render() {
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, view.w, view.h);
+  ctx.translate(view.ox, view.oy); ctx.scale(view.scale, view.scale);
+  drawRoom(); drawPod(); drawLever(); drawGasket(); drawSteam(); drawHUD(); drawGameOver();
+  if (state.flash > 0) {
+    ctx.fillStyle = `rgba(255,179,92,${state.flash * (reducedMotion ? .12 : .65)})`;
+    ctx.fillRect(0, 0, scene.w, scene.h);
+  }
+}
+function frame(timestamp) {
+  if (!previousTime) previousTime = timestamp;
+  accumulator += Math.min(CONFIG.maxFrame, (timestamp - previousTime) / 1000);
+  previousTime = timestamp;
+  while (accumulator >= CONFIG.step) { update(CONFIG.step); accumulator -= CONFIG.step; }
+  render();
+  requestAnimationFrame(frame);
+}
+bindInput();
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

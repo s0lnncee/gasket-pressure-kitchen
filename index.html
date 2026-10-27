@@ -13,17 +13,169 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
 #replay { position: fixed; left: 50%; transform: translateX(-50%); padding: 15px 34px; border: 1px solid #FFB35C; border-radius: 3px; background: #F05A18; color: #0D0908; font: bold 17px monospace; cursor: pointer; }
 #replay:hover { background: #FFB35C; }
-#replay:focus-visible { outline: 3px solid #F3EEE9; outline-offset: 5px; }
+#mute:focus-visible, #replay:focus-visible { outline: 3px solid #F3EEE9; outline-offset: 5px; }
+#mute { position: fixed; right: 10px; top: 8px; padding: 6px 10px; border: 1px solid #9C7B62; border-radius: 3px; background: #140D0B; color: #FFB35C; font: 12px monospace; cursor: pointer; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>
 </head>
 <body>
-<canvas id="kitchen" tabindex="0" aria-label="Gasket's Pressure Kitchen. Hold Space or hold the vent lever to lower pressure. Keep 65 to 85 PSI to score; 100 PSI causes a blowout." aria-describedby="instructions"></canvas>
-<p id="instructions" class="sr-only">Press Space or Enter to start. Hold Space or the lever to vent. Release to build pressure. At game over press Space, Enter, or Play again.</p>
+<canvas id="kitchen" tabindex="0" aria-label="Gasket's Pressure Kitchen. Hold Space, click or touch anywhere to vent. Cook five batches in their orange target zones; 100 PSI causes a blowout." aria-describedby="instructions"></canvas>
+<p id="instructions" class="sr-only">Hold Space, click or touch anywhere to start venting. Enter starts without venting. Cook five batches by holding the orange target zone for eight cumulative seconds each. Release to heat. M toggles sound. After a result, Space, Enter or Play again starts a new service without venting.</p>
 <p id="announcement" class="sr-only" aria-live="polite"></p>
-<button id="replay" hidden>Play again</button>
-<script src="src/sim.js"></script>
+<button id="mute" type="button" aria-pressed="false" aria-label="Mute sound (M)">Sound on · M</button>
+<button id="replay" type="button" hidden>Play again</button>
+<script id="sim">
+/* Pure service simulation: no DOM, audio, randomness or hidden state. */
+globalThis.KitchenPhysics = (() => {
+  'use strict';
+
+  const SETTINGS = Object.freeze({
+    maxPSI: 100,
+    zoneLow: 65,
+    zoneHigh: 85,
+    warningPSI: 90,
+    initialPSI: 58,
+    heatBase: 7.5,
+    heatRamp: 0.09,
+    heatAcceleration: 0.0005,
+    ventForce: 37,
+    ventCurve: 2,
+    warmupSeconds: 10,
+    warmupHeat: 2.5,
+    pressureResponse: 3.5,
+    spring: 180,
+    damping: 25,
+    surgeEvery: 7,
+    surgeDuration: 2,
+    surgeForce: 2,
+    pointsPerSecond: 100,
+    comboSeconds: 3,
+    comboMax: 5,
+    step: 1 / 120,
+    batchPause: 1.2,
+    dishBonus: 500,
+    surgeWarningSeconds: 1.4,
+    batches: Object.freeze([
+      { low: 65, high: 85, heat: 0, seconds: 8, surge: 2 },
+      { low: 68, high: 82, heat: 1, seconds: 8, surge: 2.5 },
+      { low: 70, high: 80, heat: 2, seconds: 8, surge: 3 },
+      { low: 71, high: 79, heat: 3, seconds: 8, surge: 3.5 },
+      { low: 72, high: 78, heat: 4, seconds: 8, surge: 4 }
+    ].map(Object.freeze))
+  });
+
+  function create(best = 0) {
+    return {
+      phase: 'ready',
+      pressure: SETTINGS.initialPSI,
+      velocity: 0,
+      heat: SETTINGS.heatBase,
+      elapsed: 0,
+      score: 0,
+      best,
+      combo: 1,
+      zoneTime: 0,
+      inZone: false,
+      lever: 0,
+      leverVelocity: 0,
+      surge: 0,
+      surgeWarning: false,
+      batchIndex: 0,
+      batchTime: 0,
+      cookTime: 0,
+      dishes: 0,
+      pauseTime: 0
+    };
+  }
+
+  function batch(state) {
+    return SETTINGS.batches[state.batchIndex];
+  }
+
+  function heat(state) {
+    const ignition = Math.min(1, state.elapsed / SETTINGS.warmupSeconds);
+    const warmup = SETTINGS.warmupHeat / SETTINGS.heatBase;
+    return (SETTINGS.heatBase + state.elapsed * SETTINGS.heatRamp
+      + state.elapsed ** 2 * SETTINGS.heatAcceleration + batch(state).heat)
+      * (warmup + (1 - warmup) * ignition);
+  }
+
+  function score(state, dt) {
+    const target = batch(state);
+    state.inZone = state.pressure >= target.low && state.pressure <= target.high;
+    state.zoneTime = state.inZone ? state.zoneTime + dt : 0;
+    state.combo = Math.min(SETTINGS.comboMax, 1 + Math.floor(state.zoneTime / SETTINGS.comboSeconds));
+    if (state.inZone) {
+      state.score += SETTINGS.pointsPerSecond * state.combo * dt;
+      state.cookTime = Math.min(batch(state).seconds, state.cookTime + dt);
+    }
+  }
+
+  function step(state, dt, venting) {
+    if (!(dt > 0) || dt > 0.1) {
+      throw new Error('Simulation step must be greater than zero and at most 0.1 seconds.');
+    }
+    const target = state.phase === 'cooking' && venting ? 1 : 0;
+    state.leverVelocity += ((target - state.lever) * SETTINGS.spring - state.leverVelocity * SETTINGS.damping) * dt;
+    state.lever = Math.max(0, Math.min(1, state.lever + state.leverVelocity * dt));
+    if (state.lever === 0 || state.lever === 1) {
+      state.leverVelocity = 0;
+    }
+    if (state.phase === 'batch') {
+      state.elapsed += dt;
+      state.pauseTime = Math.max(0, state.pauseTime - dt);
+      if (state.pauseTime === 0) {
+        state.batchIndex++;
+        state.batchTime = 0;
+        state.cookTime = 0;
+        state.pressure = (batch(state).low + batch(state).high) / 2;
+        state.velocity = 0;
+        state.heat = heat(state);
+        state.phase = 'cooking';
+      }
+      return;
+    }
+    if (state.phase !== 'cooking') return;
+
+    state.elapsed += dt;
+    state.batchTime += dt;
+    // Heat and narrower target bands change control demands, not just the display.
+    state.heat = heat(state);
+    const surgePhase = state.batchTime % SETTINGS.surgeEvery;
+    state.surgeWarning = surgePhase >= SETTINGS.surgeEvery - SETTINGS.surgeWarningSeconds;
+    state.surge = state.batchTime >= SETTINGS.surgeEvery && surgePhase < SETTINGS.surgeDuration
+      ? Math.sin(surgePhase / SETTINGS.surgeDuration * Math.PI) * (batch(state).surge + state.elapsed * 0.025)
+      : 0;
+    // Progressive valve opening: short pulls trim pressure; a full pull vents hard.
+    const cooling = state.lever ** SETTINGS.ventCurve * SETTINGS.ventForce;
+    const targetVelocity = state.heat + state.surge - cooling;
+    state.velocity += (targetVelocity - state.velocity) * SETTINGS.pressureResponse * dt;
+    state.pressure = Math.max(0, Math.min(SETTINGS.maxPSI, state.pressure + state.velocity * dt));
+    if (state.pressure === 0) {
+      state.velocity = Math.max(0, state.velocity);
+    }
+    score(state, dt);
+    if (state.pressure === SETTINGS.maxPSI) {
+      state.phase = 'gameover';
+      state.best = Math.max(state.best, Math.floor(state.score));
+    } else if (state.cookTime >= batch(state).seconds) {
+      state.dishes++;
+      state.score += SETTINGS.dishBonus;
+      state.surge = 0;
+      state.surgeWarning = false;
+      state.velocity = 0;
+      state.pauseTime = SETTINGS.batchPause;
+      state.phase = state.dishes === SETTINGS.batches.length ? 'victory' : 'batch';
+      if (state.phase === 'victory') {
+        state.best = Math.max(state.best, Math.floor(state.score));
+      }
+    }
+  }
+
+  return Object.freeze({ SETTINGS, create, step, score, batch });
+})();
+</script>
 <script>
 'use strict';
 // CONFIG: all gameplay values and scene geometry live here, in logical units.
@@ -37,6 +189,15 @@ const CONFIG = {
   pressPuffCount: 12,
   burstParticleCount: 95,
   hintFadeSpeed: 1.4,
+  celebrationSeconds: 1.2,
+  sound: {
+    storageKey: 'gasket-muted-v1',
+    volume: 0.14,
+    hissVolume: 0.035,
+    alarmInterval: 0.9,
+    beepSeconds: 0.13,
+    chimeSeconds: 0.22
+  },
   colors: {
     bg: '#0D0908',
     dark: '#140D0B',
@@ -107,6 +268,32 @@ const CONFIG = {
       h: 440,
       buttonY: 98
     },
+    serviceConsole: {
+      inset: .035,
+      border: 12,
+      titleY: 24,
+      counterY: 51,
+      meterY: 82,
+      grilleWidth: 40,
+      grilleCount: 7,
+      dishX: .28,
+      batchX: .72
+    },
+    status: {
+      wideWidth: 610,
+      tallWidth: 800,
+      progressGap: 11,
+      progressHeight: 6,
+      captionGap: 18,
+      popInset: 18,
+      popFont: 20
+    },
+    burst: {
+      spokes: 18,
+      radius: 160,
+      expansion: 420,
+      rayLength: 55
+    },
     room: {
       columns: 12,
       rows: 7,
@@ -163,6 +350,7 @@ const canvas = document.getElementById('kitchen');
 const ctx = canvas.getContext('2d');
 const replay = document.getElementById('replay');
 const announcement = document.getElementById('announcement');
+const mute = document.getElementById('mute');
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 let reducedMotion = motionQuery.matches;
 motionQuery.addEventListener('change', event => {
@@ -173,6 +361,135 @@ const input = {
   space: false,
   pointers: new Set()
 };
+// AUDIO: optional, quiet synthesis; nothing is created before a user gesture.
+function createSound() {
+  const settings = CONFIG.sound;
+  const notes = {
+    combo: [660, 880],
+    batch: [523, 659, 784],
+    victory: [523, 659, 784, 1046],
+    blowout: [95, 45],
+    alarm: [440]
+  };
+  let muted = false;
+  let graph = null;
+  let unavailable = false;
+  let alarmTime = 0;
+  try {
+    muted = localStorage.getItem(settings.storageKey) === 'true';
+  } catch {
+    // Sound works without persistent storage.
+  }
+
+  function label() {
+    mute.textContent = muted ? 'Sound off · M' : 'Sound on · M';
+    mute.setAttribute('aria-pressed', String(muted));
+    mute.setAttribute('aria-label', `${muted ? 'Unmute' : 'Mute'} sound (M)`);
+  }
+
+  function unlock() {
+    if (muted || unavailable) return;
+    try {
+      if (!graph) {
+        const Audio = window.AudioContext || window.webkitAudioContext;
+        if (!Audio) {
+          unavailable = true;
+          return;
+        }
+        const audio = new Audio();
+        const master = audio.createGain();
+        master.gain.value = settings.volume;
+        master.connect(audio.destination);
+        const hiss = audio.createGain();
+        hiss.gain.value = 0;
+        hiss.connect(master);
+        const filter = audio.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 1000;
+        filter.connect(hiss);
+        const noise = audio.createBufferSource();
+        const buffer = audio.createBuffer(1, audio.sampleRate, audio.sampleRate);
+        const data = buffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        noise.buffer = buffer;
+        noise.loop = true;
+        noise.connect(filter);
+        noise.start();
+        graph = { audio, master, hiss };
+      }
+      if (graph.audio.state === 'suspended') {
+        Promise.resolve(graph.audio.resume()).catch(() => {});
+      }
+    } catch {
+      unavailable = true;
+      graph = null;
+    }
+  }
+
+  function toggle() {
+    muted = !muted;
+    try {
+      localStorage.setItem(settings.storageKey, String(muted));
+    } catch {
+      // Storage is optional.
+    }
+    try {
+      if (graph) graph.master.gain.value = muted ? 0 : settings.volume;
+    } catch {
+      graph = null;
+    }
+    if (!muted) unlock();
+    label();
+  }
+
+  function play(name) {
+    if (!graph || muted) return;
+    try {
+      const { audio, master } = graph;
+      notes[name].forEach((frequency, index) => {
+        const start = audio.currentTime + index * settings.chimeSeconds;
+        const duration = name === 'alarm' ? settings.beepSeconds : settings.chimeSeconds;
+        const oscillator = audio.createOscillator();
+        const gain = audio.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(frequency, start);
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.07, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+        oscillator.connect(gain);
+        gain.connect(master);
+        oscillator.start(start);
+        oscillator.stop(start + duration + 0.02);
+      });
+    } catch {
+      // Optional audio failure must never interrupt the simulation.
+    }
+  }
+
+  function update(dt) {
+    alarmTime = Math.max(0, alarmTime - dt);
+    if (state.phase === 'cooking' && state.pressure >= CONFIG.warningPSI) {
+      if (alarmTime === 0) {
+        play('alarm');
+        alarmTime = settings.alarmInterval;
+      }
+    } else {
+      alarmTime = 0;
+    }
+    if (!graph) return;
+    try {
+      const volume = !muted && state.phase === 'cooking' ? state.lever ** CONFIG.ventCurve * settings.hissVolume : 0;
+      graph.hiss.gain.setTargetAtTime(volume, graph.audio.currentTime, 0.04);
+    } catch {
+      graph = null;
+    }
+  }
+
+  label();
+  return { unlock, toggle, play, update };
+}
+const Sound = createSound();
+
 // STATE
 function readBest() {
   try {
@@ -189,7 +506,7 @@ function createState(best = readBest()) {
     clock: 0,
     particles: [],
     emission: 0,
-    blowoutTime: 0,
+    resultTime: 0,
     flash: 0,
     shake: 0,
     ringPulse: 0,
@@ -197,7 +514,8 @@ function createState(best = readBest()) {
     popText: '',
     popLife: 0,
     acted: false,
-    hintOpacity: 1
+    hintOpacity: 1,
+    celebrationTime: 0
   };
 }
 let state = createState();
@@ -206,14 +524,13 @@ function resetState() {
   input.space = false;
   input.pointers.clear();
   replay.hidden = true;
-  announcement.textContent = 'New batch. Hold Space or the lever to vent.';
+  announcement.textContent = 'New service. Hold Space, click or touch anywhere to vent.';
 }
 
 function startCooking() {
   if (state.phase !== 'ready') return;
   state.phase = 'cooking';
-  state.acted = true;
-  announcement.textContent = 'Cooking. Keep pressure between 65 and 85 PSI.';
+  announcement.textContent = 'Batch 1 of 5. Hold the orange zone for eight cumulative seconds.';
 }
 
 function blowout() {
@@ -221,11 +538,8 @@ function blowout() {
   state.pressure = CONFIG.maxPSI;
   state.flash = 1;
   state.best = Math.max(state.best, Math.floor(state.score));
-  try {
-    localStorage.setItem(CONFIG.storageKey, String(state.best));
-  } catch {
-    /* Storage is optional. */
-  }
+  saveBest();
+  Sound.play('blowout');
   emitSteam(CONFIG.burstParticleCount, true);
   state.shake = 1;
   state.ringPulse = 1;
@@ -233,6 +547,33 @@ function blowout() {
   announcement.textContent = `Valve blowout. Final score ${Math.floor(state.score)}. Best ${state.best}. Play again.`;
   positionReplay();
 }
+function saveBest() {
+  try {
+    localStorage.setItem(CONFIG.storageKey, String(state.best));
+  } catch {
+    // A blocked localStorage must not interrupt play.
+  }
+}
+
+function celebrateBatch() {
+  state.celebrationTime = CONFIG.celebrationSeconds;
+  state.flash = 0.4;
+  state.ringPulse = 1;
+  emitSteam(CONFIG.pressPuffCount * 2, true);
+  feedback('BATCH COOKED! +1 DISH', true);
+  Sound.play(state.phase === 'victory' ? 'victory' : 'batch');
+  if (state.phase === 'victory') {
+    saveBest();
+    replay.hidden = true;
+    announcement.textContent = `Service complete! ${state.dishes} dishes, score ${Math.floor(state.score)}. Play again.`;
+    positionReplay();
+  }
+}
+
+function isResult() {
+  return state.phase === 'gameover' || state.phase === 'victory';
+}
+
 // PHYSICS: fixed-step spring lever and damped pressure velocity.
 function isVenting() {
   return input.space || input.pointers.size > 0;
@@ -286,42 +627,59 @@ function update(dt) {
   const previousZone = state.inZone;
   const previousCombo = state.combo;
   const previousPhase = state.phase;
+  const previousDishes = state.dishes;
   KitchenPhysics.step(state, dt, isVenting());
-  if (previousPhase === 'cooking' && state.phase === 'gameover') {
+  if (state.dishes > previousDishes) {
+    celebrateBatch();
+  } else if (previousPhase === 'cooking' && state.phase === 'gameover') {
     blowout();
+  } else if (previousPhase === 'batch' && state.phase === 'cooking') {
+    feedback(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length} · HEAT LV ${state.batchIndex + 1}`, true);
   } else if (state.phase === 'cooking') {
     if (state.combo > previousCombo) {
       feedback(`COMBO ×${state.combo}!`, true);
+      Sound.play('combo');
     } else if (state.inZone !== previousZone) {
-      feedback(state.inZone ? 'SWEET SPOT!' : state.pressure > CONFIG.zoneHigh ? 'TOO HOT · VENT' : 'HEAT IT UP');
+      feedback(state.inZone ? 'SWEET SPOT!' : state.pressure > KitchenPhysics.batch(state).high ? 'TOO HOT · VENT' : 'HEAT IT UP');
     }
   }
-  if (state.phase === 'gameover') {
-    state.blowoutTime += dt;
-    replay.hidden = state.blowoutTime < CONFIG.overlayDelay;
+  if (isResult()) {
+    state.resultTime += dt;
+    replay.hidden = state.resultTime < CONFIG.overlayDelay;
   }
   state.flash = Math.max(0, state.flash - dt * 2.5);
   state.shake = Math.max(0, state.shake - dt * 1.8);
   state.ringPulse = Math.max(0, state.ringPulse - dt * 1.6);
   state.zoneFlash = Math.max(0, state.zoneFlash - dt);
   state.popLife = Math.max(0, state.popLife - dt);
+  state.celebrationTime = Math.max(0, state.celebrationTime - dt);
+  Sound.update(dt);
   if (state.acted) state.hintOpacity = Math.max(0, state.hintOpacity - dt * CONFIG.hintFadeSpeed);
   updateSteam(dt);
 }
 // INPUT: independent sources avoid stuck keys or a pointer overriding Space.
 function activate() {
-  if (state.phase === 'gameover') {
-    if (state.blowoutTime < CONFIG.overlayDelay) return;
+  if (isResult()) {
+    if (state.resultTime < CONFIG.overlayDelay) return false;
     resetState();
   }
   startCooking();
+  return true;
 }
 
 function keydown(event) {
+  if (event.code === 'KeyM' && !event.repeat) {
+    event.preventDefault();
+    Sound.toggle();
+    return;
+  }
+  if (event.target instanceof HTMLButtonElement) return;
   if (event.code !== 'Space' && event.code !== 'Enter') return;
   event.preventDefault();
   if (event.repeat) return;
-  activate();
+  Sound.unlock();
+  const restarting = isResult();
+  if (!activate() || restarting) return;
   if (event.code === 'Space') {
     pressVent();
     input.space = true;
@@ -329,32 +687,22 @@ function keydown(event) {
 }
 
 function keyup(event) {
+  if (event.target instanceof HTMLButtonElement) return;
   if (event.code === 'Space') {
     event.preventDefault();
     input.space = false;
   }
 }
 
-function pointerPoint(event) {
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: (event.clientX - rect.left - view.ox) / view.scale,
-    y: (event.clientY - rect.top - view.oy) / view.scale
-  };
-}
-
-function hitsLever(point) {
-  const g = CONFIG.layout.lever;
-  return Math.abs(point.x - scene.leverX) < g.hitW * scene.unit / 2 &&
-    Math.abs(point.y - scene.leverY + g.arm * scene.unit / 3) < g.hitH * scene.unit / 2;
-}
-
 function pointerdown(event) {
-  if (event.button !== 0 || !hitsLever(pointerPoint(event)) || state.phase === 'gameover') return;
+  if (event.button !== 0) return;
   event.preventDefault();
+  Sound.unlock();
+  if (isResult()) return;
   startCooking();
   pressVent();
   input.pointers.add(event.pointerId);
+  canvas.focus({ preventScroll: true });
   canvas.setPointerCapture(event.pointerId);
 }
 
@@ -374,9 +722,8 @@ function bindInput() {
   canvas.addEventListener('pointerup', releasePointer);
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('lostpointercapture', releasePointer);
-  canvas.addEventListener('pointermove', event => {
-    canvas.style.cursor = hitsLever(pointerPoint(event)) ? 'grab' : 'default';
-  });
+  canvas.style.cursor = 'grab';
+  mute.addEventListener('click', () => Sound.toggle());
   window.addEventListener('blur', releaseAll);
   document.addEventListener('visibilitychange', () => {
     releaseAll();
@@ -384,6 +731,7 @@ function bindInput() {
     previousTime = 0;
   });
   replay.addEventListener('click', () => {
+    Sound.unlock();
     resetState();
     startCooking();
     canvas.focus();
@@ -529,34 +877,44 @@ function drawRoom() {
   drawAmbientSteam();
 }
 
-// The portrait floor doubles as the boiler's return-line service console.
+// The floor doubles as the boiler's return-line service console.
 function drawFloorConsole() {
-  if (!scene.portrait) return;
-  const { w, h } = scene;
+  const { w, h, portrait } = scene;
+  const g = CONFIG.layout.serviceConsole;
   const floor = h * CONFIG.layout.room.floorY;
-  const panelTop = floor + 12;
-  const panelHeight = h - panelTop - 12;
-  rounded(w * .035, panelTop, w * .93, panelHeight, 10, C.panel, C.rim, 3);
+  const panelTop = floor + g.border;
+  const panelHeight = h - panelTop - g.border;
+  rounded(w * g.inset, panelTop, w * (1 - 2 * g.inset), panelHeight, 10, C.panel, C.rim, 3);
   rounded(w * .05, panelTop + 10, w * .90, panelHeight - 20, 6, C.dark, C.seam, 2);
   for (const side of [.075, .925]) {
     rivet(w * side, panelTop + 22, 4);
     rivet(w * side, h - 35, 4);
-    const grilleX = w * side - 20;
-    for (let i = 0; i < 7; i++) {
-      const y = panelTop + 48 + i * (panelHeight - 100) / 7;
-      rounded(grilleX, y, 40, 7, 3, C.black, C.steel, 1);
+    const grilleX = w * side - g.grilleWidth / 2;
+    const grilleCount = portrait ? g.grilleCount : 3;
+    const grilleTop = portrait ? 48 : 35;
+    const grilleSpan = Math.max(12, panelHeight - grilleTop - 35);
+    for (let i = 0; i < grilleCount; i++) {
+      const y = panelTop + grilleTop + i * grilleSpan / grilleCount;
+      rounded(grilleX, y, g.grilleWidth, 7, 3, C.black, C.steel, 1);
     }
   }
-  text('RETURN LINE / MANUAL REGULATION', w * .5, panelTop + 28, 17, C.amber, 'center', 'bold');
-  const meterWidth = w * .48;
-  rounded(w * .26, panelTop + 57, meterWidth, 19, 3, C.black, C.steel);
-  for (let i = 0; i < 18; i++) {
-    const lit = i < Math.round(state.lever * 18);
-    rounded(w * .26 + 5 + i * (meterWidth - 10) / 18, panelTop + 61,
-      (meterWidth - 10) / 18 - 4, 11, 1, lit ? C.amber : C.seam);
-  }
+  text('SERVICE / RETURN LINE', w * .5, panelTop + g.titleY, portrait ? 17 : 12, C.amber, 'center', 'bold');
+  text(`DISHES ${state.dishes}/${CONFIG.batches.length}`, w * g.dishX, panelTop + g.counterY, portrait ? 20 : 16, C.text, 'center', 'bold');
+  text(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length}`, w * g.batchX, panelTop + g.counterY, portrait ? 20 : 16, C.amber, 'center', 'bold');
+  if (portrait) drawVentMeter(panelTop + g.meterY);
   line([[w * .15, panelTop + 49], [w * .15, h - 26], [w * .29, h - 26]], C.steel, 7);
   line([[w * .85, panelTop + 49], [w * .85, h - 26], [w * .71, h - 26]], C.steel, 7);
+}
+
+function drawVentMeter(y) {
+  const w = scene.w;
+  const meterWidth = w * .48;
+  rounded(w * .26, y, meterWidth, 19, 3, C.black, C.steel);
+  for (let i = 0; i < 18; i++) {
+    const lit = i < Math.round(state.lever * 18);
+    rounded(w * .26 + 5 + i * (meterWidth - 10) / 18, y + 4,
+      (meterWidth - 10) / 18 - 4, 11, 1, lit ? C.amber : C.seam);
+  }
 }
 
 function drawRoomLights() {
@@ -603,9 +961,11 @@ function drawWallInstruments() {
   const x = w * .12;
   const y = h * (portrait ? .70 : .47);
   rounded(x - 65, y - 110, 130, 235, 8, C.panel, C.steel);
-  local(x, y - 35, .35, () => drawDial(110, 30 + Math.sin(state.clock) * 6, false));
-  text('HEAT / 04', x, y + 30, 12, C.muted, 'center');
-  for (let i = 0; i < 4; i++) rounded(x - 42, y + 54 + i * 13, 84, 5, 1, i < 3 ? C.orange : C.seam);
+  local(x, y - 35, .35, () => drawDial(110, (state.batchIndex + 1) / CONFIG.batches.length * CONFIG.maxPSI, false));
+  text('BURNER', x, y + 30, 12, C.muted, 'center');
+  for (let i = 0; i < CONFIG.batches.length; i++) {
+    rounded(x - 42, y + 54 + i * 11, 84, 5, 1, i <= state.batchIndex ? C.orange : C.seam);
+  }
   const ventX = w * .83;
   const ventY = h * .28;
   rounded(ventX - 80, ventY - 35, 160, 80, 5, C.dark, C.steel);
@@ -656,7 +1016,7 @@ function drawPodPlumbing() {
   line([[-g.w / 2, 30], [-g.w / 2 - 55, 30], [-g.w / 2 - 55, 185], [-g.w / 2, 185]], C.steel, 28);
   line([[g.w / 2 - 70, -g.h / 2], [g.valveX - 30, g.valveY], [g.valveX, g.valveY]], C.black, 38);
   line([[g.w / 2 - 70, -g.h / 2], [g.valveX - 30, g.valveY], [g.valveX, g.valveY]], C.rim, 25);
-  const lift = state.phase === 'gameover' ? -Math.min(150, state.blowoutTime * 280) : -state.lever * 8;
+  const lift = state.phase === 'gameover' ? -Math.min(150, state.resultTime * 280) : -state.lever * 8;
   rounded(g.valveX - 18, g.valveY - 18 + lift, 42, 12, 3, C.orange, C.amber);
 }
 
@@ -703,26 +1063,32 @@ function drawDial(r, psi, main) {
   circle(0, 0, r + 12, C.black, C.rim, 4);
   circle(0, 0, r, C.dark, main && state.inZone ? C.orange : C.steel, 8);
   arc(r * .79, g.start, g.start + g.sweep, C.seam, r * .105);
-  arc(r * .79, pressureAngle(CONFIG.zoneLow), pressureAngle(CONFIG.zoneHigh), C.orange, r * .105);
-  arc(r * .79, pressureAngle(CONFIG.warningPSI), pressureAngle(CONFIG.maxPSI), C.red, r * .055);
-  drawDialTicks(r);
-  text(main ? 'POD PRESSURE' : 'THERMAL', 0, -r * .34, r * .075, C.muted, 'center');
-  text(psi.toFixed(0), 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
-  text('PSI', 0, r * .60, r * .085, C.muted, 'center');
+  const target = KitchenPhysics.batch(state);
+  if (main) {
+    arc(r * .79, pressureAngle(target.low), pressureAngle(target.high), C.orange, r * .105);
+    arc(r * .79, pressureAngle(CONFIG.warningPSI), pressureAngle(CONFIG.maxPSI), C.red, r * .055);
+  } else {
+    arc(r * .79, g.start, pressureAngle(psi), C.orange, r * .105);
+  }
+  drawDialTicks(r, main);
+  text(main ? 'POD PRESSURE' : 'BURNER', 0, -r * .34, r * .075, C.muted, 'center');
+  text(main ? psi.toFixed(0) : String(state.batchIndex + 1), 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
+  text(main ? 'PSI' : 'HEAT LV', 0, r * .60, r * .085, C.muted, 'center');
   drawNeedle(r, psi, main);
-  if (main) text(state.inZone ? `×${state.combo} COOKING` : '65 — 85', 0, r * .87, r * .08, C.amber, 'center');
+  if (main) text(`${target.low}–${target.high} PSI${state.inZone ? ` · ×${state.combo}` : ''}`, 0, r * .87, r * .08, C.amber, 'center');
 }
 
-function drawDialTicks(r) {
+function drawDialTicks(r, main) {
   const g = CONFIG.layout.gauge;
-  for (let i = 0; i <= g.tickCount; i++) {
-    const psi = i / g.tickCount * CONFIG.maxPSI;
+  const ticks = main ? g.tickCount : CONFIG.batches.length;
+  for (let i = 0; i <= ticks; i++) {
+    const psi = i / ticks * CONFIG.maxPSI;
     const a = pressureAngle(psi);
-    const major = i % 5 === 0;
+    const major = !main || i % 5 === 0;
     const outer = r * .9;
     const inner = r * (major ? .79 : .85);
     line([[Math.cos(a) * inner, Math.sin(a) * inner], [Math.cos(a) * outer, Math.sin(a) * outer]], C.muted, major ? 2 : 1);
-    if (major) text(String(psi), Math.cos(a) * r * .66, Math.sin(a) * r * .66, r * .072, C.text, 'center');
+    if (major) text(String(main ? psi : i), Math.cos(a) * r * .66, Math.sin(a) * r * .66, r * .072, C.text, 'center');
   }
 }
 
@@ -831,37 +1197,58 @@ function drawSteam() {
 // HUD AND PHASE OVERLAYS
 function drawHUD() {
   drawHeader();
-  const { w, h, footerY, portrait } = scene;
-  const bandY = portrait ? h * .164 : h * .23;
-  const bandX = portrait ? w * .5 : w * .43;
-  const warning = state.pressure >= CONFIG.warningPSI && state.phase === 'cooking';
-  const startHint = portrait ? 'HOLD THE LEVER TO START' : 'AWAITING CHEF · PRESS SPACE TO START';
-  let label = state.phase === 'ready' ? startHint : 'BUILD PRESSURE · TARGET 65–85 PSI';
-  if (state.inZone && state.phase === 'cooking') label = `IN ZONE ×${state.combo}  /  +${CONFIG.pointsPerSecond * state.combo} PTS/SEC`;
-  if (state.pressure > CONFIG.zoneHigh && state.phase === 'cooking') label = 'TOO HOT · HOLD TO VENT';
-  if (warning) label = Math.sin(state.clock * 12) > 0 ? '! CRITICAL PRESSURE · VENT NOW !' : '! VALVE OVERLOAD · HOLD SPACE !';
-  if (state.phase === 'gameover') label = 'BATCH LOST · VALVE BLOWOUT';
-  const bandWidth = portrait ? 760 : 510;
-  const bandHeight = portrait ? 64 : 42;
-  rounded(bandX - bandWidth / 2, bandY - bandHeight / 2, bandWidth, bandHeight, 4, C.dark, warning ? C.red : C.orange);
-  text(label, bandX, bandY, portrait ? 24 : 15, warning ? C.red : C.amber, 'center', 'bold');
-  if (state.inZone && state.phase === 'cooking') {
-    const progress = state.combo === CONFIG.comboMax ? 1 : (state.zoneTime % CONFIG.comboSeconds) / CONFIG.comboSeconds;
-    rounded(bandX - bandWidth / 2 + 5, bandY + bandHeight / 2 + 6, bandWidth - 10, 3, 0, C.seam);
-    rounded(bandX - bandWidth / 2 + 5, bandY + bandHeight / 2 + 6, (bandWidth - 10) * progress, 3, 0, C.orange);
-  }
-  ctx.save();
-  ctx.globalAlpha = state.hintOpacity;
-  text('Hold SPACE or the lever to vent', w * .5, footerY, portrait ? 22 : 20, C.text, 'center');
-  ctx.restore();
-  text('RELEASE TO BUILD PRESSURE  /  100 PSI = BLOWOUT', w * .5, footerY + 33, portrait ? 14 : 13, C.muted, 'center');
-  if (state.popLife > 0 && state.phase === 'cooking') {
+  drawBatchStatus();
+  drawControlHint();
+  if (state.popLife > 0 && (state.phase === 'cooking' || state.phase === 'batch')) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, state.popLife * 3);
-    const rise = (1 - state.popLife / CONFIG.feedbackDuration) * 22;
-    text(state.popText, scene.podX, scene.podY - 245 * scene.unit - rise, 23, C.amber, 'center', 'bold');
+    const status = CONFIG.layout.status;
+    const popY = scene.podY - CONFIG.layout.pod.h / 2 * scene.unit + status.popInset * scene.unit;
+    text(state.popText, scene.podX, popY, status.popFont, C.amber, 'center', 'bold');
     ctx.restore();
   }
+}
+
+function drawBatchStatus() {
+  const { w, h, portrait } = scene;
+  const g = CONFIG.layout.status;
+  const target = KitchenPhysics.batch(state);
+  const x = w * (portrait ? .5 : .43);
+  const y = h * (portrait ? .164 : .23);
+  const width = portrait ? g.tallWidth : g.wideWidth;
+  const height = state.phase === 'ready' ? (portrait ? 86 : 52) : (portrait ? 64 : 42);
+  const critical = state.phase === 'cooking' && state.pressure >= CONFIG.warningPSI;
+  let label = `BUILD PRESSURE · TARGET ${target.low}–${target.high} PSI`;
+  if (state.inZone) label = `IN ZONE ×${state.combo} / +${CONFIG.pointsPerSecond * state.combo} PTS/SEC`;
+  if (state.pressure > target.high) label = 'TOO HOT · HOLD TO VENT';
+  if (state.surgeWarning) label = `SURGE INCOMING · TARGET ${target.low}–${target.high} PSI`;
+  if (critical) label = state.surgeWarning ? 'CRITICAL · VENT NOW · SURGE INCOMING' : 'CRITICAL PRESSURE · VENT NOW';
+  if (state.phase === 'batch') label = `BATCH COOKED! · NEXT: HEAT LV ${state.batchIndex + 2}`;
+  if (state.phase === 'victory') label = 'SERVICE COMPLETE · ALL FIVE DISHES COOKED';
+  if (state.phase === 'gameover') label = `BATCH ${state.batchIndex + 1} LOST · VALVE BLOWOUT`;
+  rounded(x - width / 2, y - height / 2, width, height, 4, C.dark, critical ? C.red : C.orange);
+  if (state.phase === 'ready') {
+    text('HOLD SPACE, CLICK OR TOUCH TO VENT', x, y - 12, portrait ? 23 : 16, C.amber, 'center', 'bold');
+    text('PRESS TO START · ENTER STARTS WITHOUT VENTING', x, y + 15, portrait ? 17 : 12, C.text, 'center');
+  } else {
+    text(label, x, y, portrait ? 22 : 15, critical ? C.red : C.amber, 'center', 'bold');
+  }
+  const progressY = y + height / 2 + g.progressGap;
+  const progress = state.cookTime / target.seconds;
+  rounded(x - width / 2, progressY, width, g.progressHeight, 2, C.seam);
+  if (progress > 0) rounded(x - width / 2, progressY, width * progress, g.progressHeight, 2, C.amber);
+  text(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length} · ${state.cookTime.toFixed(1)}/${target.seconds}s IN ZONE · TARGET ${target.low}–${target.high}`,
+    x, progressY + g.captionGap, portrait ? 18 : 12, C.text, 'center');
+}
+
+function drawControlHint() {
+  const { w, h, portrait, footerY } = scene;
+  const y = portrait ? footerY : h - 39;
+  ctx.save();
+  ctx.globalAlpha = state.hintOpacity;
+  text('Hold SPACE, click or touch anywhere to vent', w * .5, y, portrait ? 19 : 16, C.text, 'center');
+  ctx.restore();
+  text('RELEASE TO HEAT / 100 PSI = BLOWOUT', w * .5, y + (portrait ? 21 : 18), portrait ? 14 : 12, C.muted, 'center');
 }
 
 function drawHeader() {
@@ -872,7 +1259,7 @@ function drawHeader() {
   text('A LITTLE HEAT. A LOT OF NERVE.', left, headerY + 76, 12, C.muted);
   const sx = w * (portrait ? .70 : .79);
   const sy = headerY + 8;
-  text('BATCH SCORE', sx, sy, 12, C.amber);
+  text('SERVICE SCORE', sx, sy, 12, C.amber);
   text(Math.floor(state.score).toString().padStart(6, '0'), sx, sy + 36, portrait ? 34 : 39, C.text, 'left', 'bold');
   text(`BEST ${state.best.toString().padStart(6, '0')}`, sx, sy + 71, 12, C.muted);
   line([[left, headerY + 106], [w * .945, headerY + 106]], C.steel);
@@ -883,26 +1270,47 @@ function drawHeatReadout() {
   const x = scene.w * .79;
   const y = scene.h * .385;
   text('BOILER STATUS', x, y, 12, C.muted, 'center');
-  text(state.phase === 'cooking' ? '● FIRED UP' : state.phase === 'ready' ? '● STANDBY' : '● OFFLINE', x, y + 27, 17, C.orange, 'center', 'bold');
-  text(`HEAT ${Math.round(state.heat / CONFIG.heatBase * 100)}%  /  ${state.elapsed.toFixed(1)}s`, x, y + 54, 12, C.amber, 'center');
+  text(state.phase === 'cooking' ? '● FIRED UP' : state.phase === 'ready' ? '● STANDBY' : state.phase === 'gameover' ? '● VALVE BLOWN' : state.phase === 'victory' ? '● SERVICE DONE' : '● DISH READY', x, y + 27, 17, C.orange, 'center', 'bold');
+  text(`HEAT LV ${state.batchIndex + 1}  /  ${state.elapsed.toFixed(1)}s`, x, y + 54, 12, C.amber, 'center');
 }
 
 function drawGameOver() {
-  if (state.phase !== 'gameover' || state.blowoutTime < CONFIG.overlayDelay) return;
+  if (!isResult() || state.resultTime < CONFIG.overlayDelay) return;
+  const won = state.phase === 'victory';
   const g = CONFIG.layout.overlay;
   const x = scene.w / 2;
   const y = scene.h / 2;
   ctx.fillStyle = 'rgba(13,9,8,.84)';
   ctx.fillRect(0, 0, scene.w, scene.h);
   rounded(x - g.w / 2, y - g.h / 2, g.w, g.h, 10, C.dark, C.orange, 2);
-  text('!  VALVE BLOWOUT  !', x, y - 155, 18, C.orange, 'center', 'bold');
-  text('GAME OVER', x, y - 97, 52, C.text, 'center', 'bold');
-  text('Too much heat in the kitchen.', x, y - 48, 17, C.muted, 'center');
+  text(won ? 'ALL FIVE DISHES COOKED!' : `BATCH ${state.batchIndex + 1} · VALVE BLOWOUT`, x, y - 155, 18, C.orange, 'center', 'bold');
+  text(won ? 'SERVICE COMPLETE' : 'GAME OVER', x, y - 97, won ? 39 : 52, C.text, 'center', 'bold');
+  text(`${state.dishes}/${CONFIG.batches.length} dishes · ${state.elapsed.toFixed(1)}s service`, x, y - 48, 17, C.muted, 'center');
   text('FINAL SCORE', x - 125, y + 4, 13, C.amber, 'center');
   text('PERSONAL BEST', x + 125, y + 4, 13, C.amber, 'center');
   text(Math.floor(state.score).toString().padStart(6, '0'), x - 125, y + 43, 33, C.text, 'center', 'bold');
   text(state.best.toString().padStart(6, '0'), x + 125, y + 43, 33, C.text, 'center', 'bold');
   if (!scene.portrait) text('or press SPACE / ENTER', x, y + 190, 13, C.muted, 'center');
+}
+
+function drawPressureBurst() {
+  const lost = state.phase === 'gameover' && state.resultTime < CONFIG.overlayDelay;
+  if (!lost && state.celebrationTime <= 0) return;
+  const g = CONFIG.layout.burst;
+  const progress = lost ? state.resultTime / CONFIG.overlayDelay
+    : 1 - state.celebrationTime / CONFIG.celebrationSeconds;
+  const spread = reducedMotion ? .3 : progress;
+  local(scene.podX, scene.podY + CONFIG.layout.pod.gaugeY * scene.unit, scene.unit, () => {
+    ctx.globalAlpha = (1 - progress) * (reducedMotion ? .3 : 1);
+    circle(0, 0, g.radius + spread * g.expansion, null, C.amber, 15 * (1 - spread) + 1);
+    for (let i = 0; i < g.spokes; i++) {
+      const angle = i * Math.PI * 2 / g.spokes;
+      const inner = g.radius + spread * g.expansion / 2;
+      const outer = inner + g.rayLength + spread * g.rayLength * 2;
+      line([[Math.cos(angle) * inner, Math.sin(angle) * inner], [Math.cos(angle) * outer, Math.sin(angle) * outer]],
+        i % 2 ? C.orange : C.amber, lost ? 4 : 2);
+    }
+  });
 }
 
 function render() {
@@ -921,19 +1329,7 @@ function render() {
   drawGasket();
   drawSteam();
   ctx.restore();
-  if (state.phase === 'gameover' && state.blowoutTime < CONFIG.overlayDelay) {
-    const spread = state.blowoutTime / CONFIG.overlayDelay;
-    local(scene.podX, scene.podY - 70, scene.unit, () => {
-      ctx.globalAlpha = 1 - spread;
-      circle(0, 0, 160 + spread * 420, null, C.amber, 15 * (1 - spread) + 1);
-      for (let i = 0; i < 18; i++) {
-        const angle = i * Math.PI / 9;
-        const inner = 160 + spread * 200;
-        const outer = inner + 55 + spread * 120;
-        line([[Math.cos(angle) * inner, Math.sin(angle) * inner], [Math.cos(angle) * outer, Math.sin(angle) * outer]], i % 2 ? C.orange : C.amber, 4);
-      }
-    });
-  }
+  drawPressureBurst();
   if (state.zoneFlash > 0) {
     ctx.fillStyle = `rgba(255,179,92,${state.zoneFlash * (reducedMotion ? 0.035 : 0.09)})`;
     ctx.fillRect(0, 0, scene.w, scene.h);

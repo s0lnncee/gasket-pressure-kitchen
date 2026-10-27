@@ -510,6 +510,7 @@ function createSound() {
   let graph = null;
   let unavailable = false;
   let alarmTime = 0;
+  let ventSilenced = false;
   try {
     muted = localStorage.getItem(settings.storageKey) === 'true';
   } catch {
@@ -603,7 +604,20 @@ function createSound() {
     }
   }
 
+  function silenceVent() {
+    ventSilenced = true;
+    if (!graph) return;
+    try {
+      const now = graph.audio.currentTime;
+      graph.hiss.gain.cancelScheduledValues(now);
+      graph.hiss.gain.setValueAtTime(0, now);
+    } catch {
+      graph = null;
+    }
+  }
+
   function update(dt) {
+    if (isVenting()) ventSilenced = false;
     alarmTime = Math.max(0, alarmTime - dt);
     if (state.phase === 'cooking' && state.pressure >= CONFIG.warningPSI) {
       if (alarmTime === 0) {
@@ -615,7 +629,8 @@ function createSound() {
     }
     if (!graph) return;
     try {
-      const volume = !muted && state.phase === 'cooking' ? state.lever ** CONFIG.ventCurve * settings.hissVolume : 0;
+      const active = !muted && !ventSilenced && state.phase === 'cooking';
+      const volume = active ? state.lever ** CONFIG.ventCurve * settings.hissVolume : 0;
       graph.hiss.gain.setTargetAtTime(volume, graph.audio.currentTime, 0.04);
     } catch {
       graph = null;
@@ -623,7 +638,7 @@ function createSound() {
   }
 
   label();
-  return { unlock, toggle, play, update, refresh: label };
+  return { unlock, toggle, play, update, silenceVent, refresh: label };
 }
 const Sound = createSound();
 
@@ -858,6 +873,7 @@ function releasePointer(event) {
 function releaseAll() {
   input.space = false;
   input.pointers.clear();
+  Sound.silenceVent();
 }
 
 function bindInput() {

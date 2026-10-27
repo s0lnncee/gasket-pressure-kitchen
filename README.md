@@ -37,7 +37,7 @@ Combo and batch feedback have a reserved line inside the dial, with smaller mobi
 The hint clears the wall piping and the pod handle; the caution sign sits below the progress caption.
 Cook timers use one decimal on both sides, such as 6.5/6.5s and 8.0/8.0s.
 Space release always clears the held input, even if focus moves to a button. Window blur and hiding the
-page release all keyboard and pointer inputs.
+page release all keyboard and pointer inputs and immediately silence the hiss until the next vent action.
 
 The ignition gives an idle newcomer about **8.6 seconds** before blowout. Surges begin seven cooking
 seconds into each batch and recur every seven seconds, with a **SURGE INCOMING** warning 1.4 seconds ahead.

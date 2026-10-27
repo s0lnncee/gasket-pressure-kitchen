@@ -14,6 +14,7 @@ function setup(width, height, blocked = false) {
   const stored = new Map();
   const handlers = new Map();
   let audioContexts = 0;
+  const gains = [];
   let activeElement = null;
   const noop = () => {};
   class Button {
@@ -52,10 +53,11 @@ function setup(width, height, blocked = false) {
   };
   const param = () => ({
     value: 0,
-    setValueAtTime: noop,
+    setValueAtTime(value) { this.value = value; },
+    cancelScheduledValues() { this.cancelled = true; },
     linearRampToValueAtTime: noop,
     exponentialRampToValueAtTime: noop,
-    setTargetAtTime: noop
+    setTargetAtTime(value) { this.value = value; }
   });
   class Audio {
     constructor() {
@@ -66,7 +68,11 @@ function setup(width, height, blocked = false) {
     currentTime = 0;
     state = 'running';
     destination = {};
-    createGain() { return { gain: param(), connect: noop }; }
+    createGain() {
+      const gain = param();
+      gains.push(gain);
+      return { gain, connect: noop };
+    }
     createBiquadFilter() { return { frequency: param(), connect: noop }; }
     createBuffer() { return { getChannelData: () => new Float32Array(8000) }; }
     createBufferSource() { return { connect: noop, start: noop }; }
@@ -99,7 +105,7 @@ function setup(width, height, blocked = false) {
   const tick = seconds => run(`for(let i=0;i<Math.ceil(${seconds}/CONFIG.step);i++) update(CONFIG.step); render();`);
   return {
     run, tick, canvas, mute, replay, stored, text, labels, handlers, document,
-    audioContexts: () => audioContexts
+    gains, audioContexts: () => audioContexts
   };
 }
 
@@ -265,6 +271,30 @@ for (const [width, height] of [[1440, 900], [390, 844], [360, 740]]) {
     'hint stays above the console');
   const result = `${width}×${height}: service won in ${winTime.toFixed(1)}s; idle blowout ${lossTime.toFixed(1)}s`;
   console.log(result + '; controls, labels, mute, hint and replay passed.');
+}
+// Lifecycle events silence the looping hiss before the next animation frame.
+const audioUI = setup(1440, 900);
+audioUI.handlers.get('window:blur')();
+assert.equal(audioUI.audioContexts(), 0, 'blur before audio creation stays silent and creates no graph');
+audioUI.run("keydown({code:'Space',repeat:false,preventDefault(){}})");
+audioUI.tick(0.3);
+const hiss = audioUI.gains[1];
+assert.ok(hiss.value > 0, 'venting starts the hiss');
+for (const event of ['blur', 'hidden']) {
+  hiss.cancelled = false;
+  if (event === 'blur') audioUI.handlers.get('window:blur')();
+  else {
+    audioUI.document.hidden = true;
+    audioUI.handlers.get('document:visibilitychange')();
+  }
+  assert.equal(hiss.value, 0, `${event} immediately silences the hiss without an animation frame`);
+  assert.equal(hiss.cancelled, true, `${event} cancels pending gain automation`);
+  audioUI.document.hidden = false;
+  audioUI.tick(0.01);
+  assert.equal(hiss.value, 0, 'resuming frames without venting keeps the hiss silent');
+  audioUI.run("keydown({code:'Space',repeat:false,preventDefault(){}})");
+  audioUI.tick(0.3);
+  assert.ok(hiss.value > 0, 'a new vent action resumes the hiss');
 }
 // Layout regressions at the two judged mobile sizes, plus both desktop sizes.
 for (const [width, height] of [[1440, 900], [1280, 800], [390, 844], [360, 740]]) {

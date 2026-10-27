@@ -1,22 +1,50 @@
 # Gasket's Pressure Kitchen
 
-A single-file Canvas arcade game about controlling an industrial cooking pod with Gasket, a robot rat chef. Open `index.html` directly, including via `file://`, or serve the directory with `npx serve .`. The game has no dependencies, external assets, network requests or build step.
+A single-file Canvas game about controlling an industrial cooking pod with Gasket, a robot rat chef.
+Open `index.html` directly, including via `file://`, or serve the directory with `npx serve .`.
+No dependencies, external assets, network requests or build step are needed.
 
-Cook a five-dish service. Each batch needs **8 cumulative seconds inside its orange target band**. The bands narrow from **65–85 → 68–82 → 70–80 → 71–79 → 72–78 PSI**, and each new batch has a hotter burner and stronger surges. The gauge and progress caption always show the current band. Leaving it pauses cooking progress and resets the combo; continuous control raises the multiplier to ×5. Each cooked dish adds 500 bonus points.
+Cook a five-dish service. The first two batches need **6.5 cumulative seconds** in their orange target bands;
+the three finishing batches need **12 seconds** each. The quick opening introduces the controls before the
+more demanding finishing dishes. Bands narrow from **65–85 → 68–82 → 70–80 → 71–79 → 72–78 PSI**.
+Every new batch has a hotter burner and stronger surges. The gauge and progress caption show the current
+band and required cook time. Leaving the band pauses cooking progress and resets the combo; continuous
+control raises the multiplier to ×5. Each cooked dish adds 500 points.
 
-A cooked batch gets a warm celebration and a 1.2-second loading pause. The next batch starts at the centre of its new band with zero pressure velocity. Five dishes trigger **SERVICE COMPLETE**. At **100 PSI**, the valve blows and the current batch is lost. Both outcomes show dishes, final service score, best score and **Play again**. Score and cooking stop at the result; the best service score is saved locally when storage is available.
+A cooked batch gets a celebration and a 1.2-second loading pause. The next starts at the centre of its new
+band with zero pressure velocity. Five dishes trigger **SERVICE COMPLETE**: an amber celebration, five
+served dishes lighting in sequence, and Gasket raising both arms. At **100 PSI**, the valve blows and the
+current batch is lost; Game Over uses a separate, darker presentation. Both results show dishes, final
+service score, best score and Play again. Score and cooking freeze at the result. The best score is saved
+locally when storage is available.
 
-- **Hold Space, click or touch anywhere on the canvas:** start and vent. Buttons have their own actions.
-- **Enter:** start without venting. The hint stays until the first vent.
-- **Tap:** trim pressure gently. **Hold:** vent hard. **Release:** build pressure. The lever and pressure have inertia, so anticipate the top of the band.
-- **Play again / Space / Enter after the result animation:** start a new service. The Space press that restarts does not also vent; release and press again to vent.
-- **Sound button / M:** toggle mute. The preference is saved when storage is available.
+- **Keyboard:** hold Space to start and vent; Enter starts without venting. Release to heat. M toggles sound.
+- **Mouse:** click and hold anywhere on the canvas to start and vent; release to heat.
+- **Touch:** hold or tap anywhere on the canvas to start and vent; release to heat.
+- **Tap:** trim pressure gently. **Hold:** vent hard. Lever and pressure inertia reward anticipation.
+- **Replay:** click/tap Play again, or use Space/Enter on a keyboard after the result animation.
+  The restart press does not vent; release and press again to vent.
+- **Mute:** click/tap the sound button or press M. Space/Enter never toggle mute, even when it has focus.
+  Clicking Mute returns focus to the game. The preference is saved when storage is available.
 
-The opening ignition gives an idle newcomer about 8.6 seconds before blowout. Surges begin seven cooking seconds into each batch and recur every seven seconds, with a visible **SURGE INCOMING** warning 1.4 seconds beforehand. Burner level, elapsed time, batch progress, dish count and service score describe the same simulation on desktop and mobile. Heat keeps rising if cooking stalls, so holding the valve indefinitely also ends in blowout.
+Control labels follow the last keyboard, mouse or touch input. The initial choice follows pointer capability.
+Touch interfaces omit keyboard shortcuts on start, hints, sound controls and result screens.
+The first-vent hint stays after an Enter-only start, occupies a separate wall plaque, and hides at either result.
+Combo and batch feedback have a reserved line inside the dial rather than sitting on the pod edge.
+Space release always clears the held input, even if focus moves to a button. Window blur and hiding the
+page release all keyboard and pointer inputs.
 
-Quiet synthesized vent hiss, alarm beeps, combo/batch chimes, a blowout thump and a victory jingle are unlocked only by a user interaction. Unsupported or blocked audio fails silently. Losing focus releases input. Reduced-motion preferences disable shake and reduce flashes and burst motion.
+The ignition gives an idle newcomer about **8.6 seconds** before blowout. Surges begin seven cooking
+seconds into each batch and recur every seven seconds, with a **SURGE INCOMING** warning 1.4 seconds ahead.
+The burner readout gives its level out of five. Desktop and mobile share the same simulation. Heat keeps
+rising if cooking stalls, so holding the valve indefinitely also ends in blowout.
 
-The pure fixed-step simulation is the `<script id="sim">` block in `index.html`; drawing, input and optional audio follow it in named sections. Run the dependency-free checks:
+Quiet synthesized hiss, alarms, chimes, a blowout thump and a victory jingle unlock only after user interaction.
+Blocked audio fails silently. Reduced-motion preferences disable shaking and bouncing, reduce flashes and
+burst motion, and light all victory dishes immediately.
+
+The pure simulation is the `<script id="sim">` block in `index.html`; named sections handle drawing, input
+and optional audio. Run the dependency-free checks:
 
 ```sh
 node test/physics.test.mjs
@@ -24,6 +52,20 @@ node test/ui.test.mjs
 node .launchpad/checks/round-1/run.mjs
 ```
 
-Physics tests cover pressure rise, tap/hold cooling, inertia, clamps, scoring, combos, cumulative cooking, dish increments, hotter batches, narrower bands, surge warnings, victory, blowout and reset. Measured deterministic policies: idle blows out at **8.6s**, 150 ms taps every 400 ms blow out at **26.8s** without cooking a dish, a threshold player reacting every 450 ms completes five dishes in **110.4s**, and a predictive player reacting every 80 ms completes them in **47.3s**. These are scripted benchmarks, not human play measurements.
+Physics tests cover pressure, tap/hold cooling, inertia, clamps, scoring, combo, batch cooking, increasing heat,
+narrowing bands, surge warnings, victory, blowout and reset. They assert the opening batches' cook times and
+an expert completion within 55–65 seconds. Deterministic policy results:
 
-The UI smoke tests evaluate both inline scripts with mocked Canvas, DOM and audio interfaces. They exercise desktop keyboard and mobile pointer service completion, replay, mute persistence, hint timing, warning priority and unavailable audio/storage. Real browser rendering and sound should be reviewed separately; the mocks do not verify pixels or audible quality.
+| Policy | Result |
+| --- | --- |
+| Idle | Blowout at 8.6s; no dishes |
+| 150 ms taps every 400 ms | Blowout at 26.8s; no dishes |
+| Seeded random tapping | Blowout at 59.4s; no dishes |
+| 450 ms decisions with 250 ms pressure anticipation | Five dishes in 91.2s |
+| 80 ms predictive expert | Five dishes in 56.4s |
+
+These are scripted benchmarks, not human play measurements. UI smoke tests run both inline scripts with
+mocked Canvas, DOM and audio. They exercise keyboard and touch services, mute focus, button-focused Space
+release, blur/visibility release, input-specific wording, hint timing, sequential victory lights and replay.
+They also enforce the 120-character source-line limit. Real browser pixels and audible quality need separate
+review; mocks cannot verify them.

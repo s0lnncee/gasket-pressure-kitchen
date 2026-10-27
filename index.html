@@ -7,23 +7,79 @@
 <link rel="icon" href="data:,">
 <title>Gasket's Pressure Kitchen</title>
 <style>
-:root { color-scheme: dark; background: #0D0908; color: #F3EEE9; font-family: monospace; }
-* { box-sizing: border-box; }
-html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
-canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
-#replay { position: fixed; left: 50%; transform: translateX(-50%); padding: 15px 34px; border: 1px solid #FFB35C; border-radius: 3px; background: #F05A18; color: #0D0908; font: bold 17px monospace; cursor: pointer; }
-#replay:hover { background: #FFB35C; }
-#mute:focus-visible, #replay:focus-visible { outline: 3px solid #F3EEE9; outline-offset: 5px; }
-#mute { position: fixed; right: 10px; top: 8px; padding: 6px 10px; border: 1px solid #9C7B62; border-radius: 3px; background: #140D0B; color: #FFB35C; font: 12px monospace; cursor: pointer; }
-[hidden] { display: none !important; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+:root {
+  color-scheme: dark;
+  background: #0D0908;
+  color: #F3EEE9;
+  font-family: monospace;
+}
+* {
+  box-sizing: border-box;
+}
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  outline: none;
+}
+#replay {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 15px 34px;
+  border: 1px solid #FFB35C;
+  border-radius: 3px;
+  background: #F05A18;
+  color: #0D0908;
+  font: bold 17px monospace;
+  cursor: pointer;
+}
+#replay:hover {
+  background: #FFB35C;
+}
+#mute:focus-visible, #replay:focus-visible {
+  outline: 3px solid #F3EEE9;
+  outline-offset: 5px;
+}
+#mute {
+  position: fixed;
+  right: 10px;
+  top: 8px;
+  padding: 6px 10px;
+  border: 1px solid #9C7B62;
+  border-radius: 3px;
+  background: #140D0B;
+  color: #FFB35C;
+  font: 12px monospace;
+  cursor: pointer;
+}
+[hidden] {
+  display: none !important;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 </style>
 </head>
 <body>
-<canvas id="kitchen" tabindex="0" aria-label="Gasket's Pressure Kitchen. Hold Space, click or touch anywhere to vent. Cook five batches in their orange target zones; 100 PSI causes a blowout." aria-describedby="instructions"></canvas>
-<p id="instructions" class="sr-only">Hold Space, click or touch anywhere to start venting. Enter starts without venting. Cook five batches by holding the orange target zone for eight cumulative seconds each. Release to heat. M toggles sound. After a result, Space, Enter or Play again starts a new service without venting.</p>
+<canvas id="kitchen" tabindex="0" aria-label="Gasket's Pressure Kitchen"
+  aria-describedby="instructions"></canvas>
+<p id="instructions" class="sr-only">
+  Hold anywhere to vent. Release to heat. Cook five dishes. Tap Play again after the result.
+</p>
 <p id="announcement" class="sr-only" aria-live="polite"></p>
-<button id="mute" type="button" aria-pressed="false" aria-label="Mute sound (M)">Sound on · M</button>
+<button id="mute" type="button" aria-pressed="false" aria-label="Mute sound">Sound on</button>
 <button id="replay" type="button" hidden>Play again</button>
 <script id="sim">
 /* Pure service simulation: no DOM, audio, randomness or hidden state. */
@@ -57,11 +113,11 @@ globalThis.KitchenPhysics = (() => {
     dishBonus: 500,
     surgeWarningSeconds: 1.4,
     batches: Object.freeze([
-      { low: 65, high: 85, heat: 0, seconds: 8, surge: 2 },
-      { low: 68, high: 82, heat: 1, seconds: 8, surge: 2.5 },
-      { low: 70, high: 80, heat: 2, seconds: 8, surge: 3 },
-      { low: 71, high: 79, heat: 3, seconds: 8, surge: 3.5 },
-      { low: 72, high: 78, heat: 4, seconds: 8, surge: 4 }
+      { low: 65, high: 85, heat: 0, seconds: 6.5, surge: 2 },
+      { low: 68, high: 82, heat: 1, seconds: 6.5, surge: 2.5 },
+      { low: 70, high: 80, heat: 2, seconds: 12, surge: 3 },
+      { low: 71, high: 79, heat: 3, seconds: 12, surge: 3.5 },
+      { low: 72, high: 78, heat: 4, seconds: 12, surge: 4 }
     ].map(Object.freeze))
   });
 
@@ -263,6 +319,21 @@ const CONFIG = {
       sweep: Math.PI * 1.5,
       tickCount: 50
     },
+    victory: {
+      w: 780,
+      h: 590,
+      titleY: -210,
+      dishY: -105,
+      dishSpacing: 88,
+      dishRadius: 28,
+      lightDelay: .32,
+      scoreY: -12,
+      chefX: -245,
+      chefY: 105,
+      chefScale: .60,
+      sparkleCount: 22
+    },
+    popup: { y: -.46, font: 18 },
     overlay: {
       w: 620,
       h: 440,
@@ -284,9 +355,7 @@ const CONFIG = {
       tallWidth: 800,
       progressGap: 11,
       progressHeight: 6,
-      captionGap: 18,
-      popInset: 18,
-      popFont: 20
+      captionGap: 18
     },
     burst: {
       spokes: 18,
@@ -351,6 +420,8 @@ const ctx = canvas.getContext('2d');
 const replay = document.getElementById('replay');
 const announcement = document.getElementById('announcement');
 const mute = document.getElementById('mute');
+const coarseQuery = matchMedia('(pointer: coarse)');
+let inputType = coarseQuery.matches ? 'touch' : 'keyboard';
 const motionQuery = matchMedia('(prefers-reduced-motion: reduce)');
 let reducedMotion = motionQuery.matches;
 motionQuery.addEventListener('change', event => {
@@ -361,6 +432,26 @@ const input = {
   space: false,
   pointers: new Set()
 };
+// Wording follows hardware capability and the last actual control input.
+function touchUI() {
+  return coarseQuery.matches || inputType === 'touch';
+}
+
+function setInputType(type) {
+  inputType = type;
+  Sound.refresh();
+  updateInstructions();
+  if (view) positionReplay();
+}
+
+function updateInstructions() {
+  const instructions = document.getElementById('instructions');
+  instructions.textContent = touchUI()
+    ? 'Hold or tap anywhere to vent. Release to heat. Cook all five dishes. Tap Play again after a result.'
+    : 'Hold Space or click anywhere to vent. Enter starts without venting. M toggles sound. Cook five dishes.';
+  canvas.setAttribute('aria-label', instructions.textContent);
+}
+
 // AUDIO: optional, quiet synthesis; nothing is created before a user gesture.
 function createSound() {
   const settings = CONFIG.sound;
@@ -382,9 +473,11 @@ function createSound() {
   }
 
   function label() {
-    mute.textContent = muted ? 'Sound off · M' : 'Sound on · M';
+    const shortcut = touchUI() ? '' : ' · M';
+    mute.textContent = (muted ? 'Sound off' : 'Sound on') + shortcut;
     mute.setAttribute('aria-pressed', String(muted));
-    mute.setAttribute('aria-label', `${muted ? 'Unmute' : 'Mute'} sound (M)`);
+    const keyHint = touchUI() ? '' : ' (M)';
+    mute.setAttribute('aria-label', `${muted ? 'Unmute' : 'Mute'} sound${keyHint}`);
   }
 
   function unlock() {
@@ -486,7 +579,7 @@ function createSound() {
   }
 
   label();
-  return { unlock, toggle, play, update };
+  return { unlock, toggle, play, update, refresh: label };
 }
 const Sound = createSound();
 
@@ -530,7 +623,8 @@ function resetState() {
 function startCooking() {
   if (state.phase !== 'ready') return;
   state.phase = 'cooking';
-  announcement.textContent = 'Batch 1 of 5. Hold the orange zone for eight cumulative seconds.';
+  const seconds = KitchenPhysics.batch(state).seconds;
+  announcement.textContent = `Batch 1 of 5. Hold the orange zone for ${seconds} cumulative seconds.`;
 }
 
 function blowout() {
@@ -565,7 +659,8 @@ function celebrateBatch() {
   if (state.phase === 'victory') {
     saveBest();
     replay.hidden = true;
-    announcement.textContent = `Service complete! ${state.dishes} dishes, score ${Math.floor(state.score)}. Play again.`;
+    const score = Math.floor(state.score);
+    announcement.textContent = `Service complete! ${state.dishes} dishes, score ${score}. Play again.`;
     positionReplay();
   }
 }
@@ -640,7 +735,8 @@ function update(dt) {
       feedback(`COMBO ×${state.combo}!`, true);
       Sound.play('combo');
     } else if (state.inZone !== previousZone) {
-      feedback(state.inZone ? 'SWEET SPOT!' : state.pressure > KitchenPhysics.batch(state).high ? 'TOO HOT · VENT' : 'HEAT IT UP');
+      const correction = state.pressure > KitchenPhysics.batch(state).high ? 'TOO HOT · VENT' : 'HEAT IT UP';
+      feedback(state.inZone ? 'SWEET SPOT!' : correction);
     }
   }
   if (isResult()) {
@@ -669,14 +765,16 @@ function activate() {
 
 function keydown(event) {
   if (event.code === 'KeyM' && !event.repeat) {
+    setInputType('keyboard');
     event.preventDefault();
     Sound.toggle();
     return;
   }
-  if (event.target instanceof HTMLButtonElement) return;
+  if (event.target === replay) return;
   if (event.code !== 'Space' && event.code !== 'Enter') return;
   event.preventDefault();
   if (event.repeat) return;
+  setInputType('keyboard');
   Sound.unlock();
   const restarting = isResult();
   if (!activate() || restarting) return;
@@ -687,16 +785,17 @@ function keydown(event) {
 }
 
 function keyup(event) {
-  if (event.target instanceof HTMLButtonElement) return;
-  if (event.code === 'Space') {
-    event.preventDefault();
-    input.space = false;
-  }
+  if (event.code !== 'Space') return;
+  // Focus can move while Space is held: always release the simulated input.
+  input.space = false;
+  // Suppress native Space activation of Mute, but preserve the replay button.
+  if (event.target !== replay) event.preventDefault();
 }
 
 function pointerdown(event) {
   if (event.button !== 0) return;
   event.preventDefault();
+  setInputType(event.pointerType === 'touch' ? 'touch' : 'mouse');
   Sound.unlock();
   if (isResult()) return;
   startCooking();
@@ -723,10 +822,16 @@ function bindInput() {
   canvas.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('lostpointercapture', releasePointer);
   canvas.style.cursor = 'grab';
-  mute.addEventListener('click', () => Sound.toggle());
+  mute.addEventListener('click', event => {
+    // Keyboard activation is routed to gameplay; only pointer clicks toggle this button.
+    if (event.detail === 0) return;
+    setInputType(event.pointerType === 'touch' || coarseQuery.matches ? 'touch' : 'mouse');
+    Sound.toggle();
+    canvas.focus({ preventScroll: true });
+  });
   window.addEventListener('blur', releaseAll);
   document.addEventListener('visibilitychange', () => {
-    releaseAll();
+    if (document.hidden) releaseAll();
     accumulator = 0;
     previousTime = 0;
   });
@@ -768,6 +873,7 @@ function resize() {
 
 function positionReplay() {
   if (!view) return;
+  replay.textContent = touchUI() ? 'Tap to play again' : 'Play again';
   replay.style.top = `${view.oy + (scene.h / 2 + CONFIG.layout.overlay.buttonY) * view.scale}px`;
   replay.style.fontSize = `${Math.max(14, 17 * view.scale)}px`;
   replay.style.padding = `${Math.max(12, 15 * view.scale)}px ${Math.max(25, 34 * view.scale)}px`;
@@ -899,8 +1005,10 @@ function drawFloorConsole() {
     }
   }
   text('SERVICE / RETURN LINE', w * .5, panelTop + g.titleY, portrait ? 17 : 12, C.amber, 'center', 'bold');
-  text(`DISHES ${state.dishes}/${CONFIG.batches.length}`, w * g.dishX, panelTop + g.counterY, portrait ? 20 : 16, C.text, 'center', 'bold');
-  text(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length}`, w * g.batchX, panelTop + g.counterY, portrait ? 20 : 16, C.amber, 'center', 'bold');
+  text(`DISHES ${state.dishes}/${CONFIG.batches.length}`,
+    w * g.dishX, panelTop + g.counterY, portrait ? 20 : 16, C.text, 'center', 'bold');
+  text(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length}`,
+    w * g.batchX, panelTop + g.counterY, portrait ? 20 : 16, C.amber, 'center', 'bold');
   if (portrait) drawVentMeter(panelTop + g.meterY);
   line([[w * .15, panelTop + 49], [w * .15, h - 26], [w * .29, h - 26]], C.steel, 7);
   line([[w * .85, panelTop + 49], [w * .85, h - 26], [w * .71, h - 26]], C.steel, 7);
@@ -945,6 +1053,7 @@ function drawRoomLights() {
   text('CAUTION / LIVE STEAM', w * 0.5, signY, portrait ? 16 : 12, C.amber, 'center');
   if (portrait) {
     const instructionY = scene.podY + 300 * scene.unit;
+    if (isResult()) return;
     text('KEEP THE NEEDLE IN ORANGE', w * 0.5, instructionY, 19, C.amber, 'center', 'bold');
     text('TAP = TRIM / HOLD = COOL / RELEASE = HEAT', w * 0.5, instructionY + 32, 14, C.muted, 'center');
   }
@@ -1071,11 +1180,21 @@ function drawDial(r, psi, main) {
     arc(r * .79, g.start, pressureAngle(psi), C.orange, r * .105);
   }
   drawDialTicks(r, main);
+  if (main && state.popLife > 0 && !isResult()) {
+    const g = CONFIG.layout.popup;
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, state.popLife * 3);
+    text(state.popText, 0, r * g.y, g.font, C.amber, 'center', 'bold');
+    ctx.restore();
+  }
   text(main ? 'POD PRESSURE' : 'BURNER', 0, -r * .34, r * .075, C.muted, 'center');
-  text(main ? psi.toFixed(0) : String(state.batchIndex + 1), 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
-  text(main ? 'PSI' : 'HEAT LV', 0, r * .60, r * .085, C.muted, 'center');
+  const readout = main ? psi.toFixed(0) : `${state.batchIndex + 1}/${CONFIG.batches.length}`;
+  const readoutColor = main && state.inZone ? C.amber : C.text;
+  text(readout, 0, r * .39, r * .25, readoutColor, 'center', 'bold');
+  text(main ? 'PSI' : 'LEVEL / 5', 0, r * .60, r * .085, C.muted, 'center');
   drawNeedle(r, psi, main);
-  if (main) text(`${target.low}–${target.high} PSI${state.inZone ? ` · ×${state.combo}` : ''}`, 0, r * .87, r * .08, C.amber, 'center');
+  const bandLabel = `${target.low}–${target.high} PSI${state.inZone ? ` · ×${state.combo}` : ''}`;
+  if (main) text(bandLabel, 0, r * .87, r * .08, C.amber, 'center');
 }
 
 function drawDialTicks(r, main) {
@@ -1087,7 +1206,8 @@ function drawDialTicks(r, main) {
     const major = !main || i % 5 === 0;
     const outer = r * .9;
     const inner = r * (major ? .79 : .85);
-    line([[Math.cos(a) * inner, Math.sin(a) * inner], [Math.cos(a) * outer, Math.sin(a) * outer]], C.muted, major ? 2 : 1);
+    const mark = [[Math.cos(a) * inner, Math.sin(a) * inner], [Math.cos(a) * outer, Math.sin(a) * outer]];
+    line(mark, C.muted, major ? 2 : 1);
     if (major) text(String(main ? psi : i), Math.cos(a) * r * .66, Math.sin(a) * r * .66, r * .072, C.text, 'center');
   }
 }
@@ -1109,21 +1229,36 @@ function drawNeedle(r, psi, main) {
   circle(0, 0, r * .075, C.orange, C.amber, 3);
 }
 // GASKET: a canvas-built robot rat chef, reaching toward the lever.
-function drawGasket() {
-  local(scene.ratX, scene.ratY, scene.unit, () => {
+function drawGasket(x = scene.ratX, y = scene.ratY, scale = scene.unit, celebrating = false) {
+  const bounce = celebrating && !reducedMotion ? Math.max(0, Math.sin(state.resultTime * 6)) * 8 : 0;
+  local(x, y - bounce, scale, () => {
     drawRatBody();
-    line(CHEF.upperArm, C.black, 24);
-    line(CHEF.upperArm, C.rim, 14);
-    circle(...CHEF.elbow, 11, C.steel, C.amber);
-    const handX = (scene.leverX - scene.ratX) / scene.unit + leverTip().x;
-    const handY = (scene.leverY - scene.ratY) / scene.unit + leverTip().y;
-    line([CHEF.wrist, [handX, handY]], C.steel, 12);
-    circle(handX, handY, 12, C.rim, C.black, 3);
+    if (celebrating) drawCelebratingArms();
+    else drawWorkingArms();
     drawArtwork(CHEF.head);
     line(CHEF.mouth, C.black, 3);
     CHEF.whiskers.forEach(points => line(points, C.muted));
     drawChefHat();
   });
+}
+
+function drawWorkingArms() {
+  line(CHEF.upperArm, C.black, 24);
+  line(CHEF.upperArm, C.rim, 14);
+  circle(...CHEF.elbow, 11, C.steel, C.amber);
+  const handX = (scene.leverX - scene.ratX) / scene.unit + leverTip().x;
+  const handY = (scene.leverY - scene.ratY) / scene.unit + leverTip().y;
+  line([CHEF.wrist, [handX, handY]], C.steel, 12);
+  circle(handX, handY, 12, C.rim, C.black, 3);
+}
+
+function drawCelebratingArms() {
+  for (const side of [-1, 1]) {
+    const arm = [[side * 35, 35], [side * 75, -10], [side * 95, -70]];
+    line(arm, C.black, 24);
+    line(arm, C.rim, 14);
+    circle(side * 95, -70, 12, C.amber, C.black, 3);
+  }
 }
 
 function drawArtwork(shapes) {
@@ -1162,6 +1297,11 @@ function leverTip() {
 
 function drawLever() {
   const g = CONFIG.layout.lever;
+  const kind = touchUI() ? 'touch' : inputType;
+  const control = kind === 'keyboard' ? 'HOLD SPACE'
+    : kind === 'touch' ? 'HOLD / TAP' : 'HOLD CLICK';
+  const key = kind === 'keyboard' ? '[ SPACE ]'
+    : kind === 'touch' ? '[ TOUCH ]' : '[ CLICK ]';
   local(scene.leverX, scene.leverY, scene.unit, () => {
     rounded(-g.w / 2, -g.h / 2, g.w, g.h, 12, C.black, C.steel, 4);
     for (const side of [-1, 1]) rivet(side * g.w * .36, g.h * .39, 5);
@@ -1172,8 +1312,9 @@ function drawLever() {
     circle(0, g.pivotY, 21, C.steel, C.rim, 3);
     rivet(0, g.pivotY, 9);
     rounded(tip.x - 36, tip.y - 14, 72, 28, 10, isVenting() ? C.amber : C.orange, C.black, 4);
-    text(state.lever > .5 ? 'VENTING' : 'HOLD TO VENT', 0, g.h / 2 + 27, scene.portrait ? 20 : 14, C.amber, 'center', 'bold');
-    text(scene.portrait ? 'TAP / HOLD' : '[ SPACE ]', 0, g.h / 2 + 51, scene.portrait ? 17 : 13, C.muted, 'center');
+    if (isResult()) return;
+    text(state.lever > .5 ? 'VENTING' : control, 0, g.h / 2 + 27, scene.portrait ? 20 : 14, C.amber, 'center', 'bold');
+    text(key, 0, g.h / 2 + 51, scene.portrait ? 17 : 13, C.muted, 'center');
   });
 }
 
@@ -1199,14 +1340,7 @@ function drawHUD() {
   drawHeader();
   drawBatchStatus();
   drawControlHint();
-  if (state.popLife > 0 && (state.phase === 'cooking' || state.phase === 'batch')) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, state.popLife * 3);
-    const status = CONFIG.layout.status;
-    const popY = scene.podY - CONFIG.layout.pod.h / 2 * scene.unit + status.popInset * scene.unit;
-    text(state.popText, scene.podX, popY, status.popFont, C.amber, 'center', 'bold');
-    ctx.restore();
-  }
+
 }
 
 function drawBatchStatus() {
@@ -1228,8 +1362,11 @@ function drawBatchStatus() {
   if (state.phase === 'gameover') label = `BATCH ${state.batchIndex + 1} LOST · VALVE BLOWOUT`;
   rounded(x - width / 2, y - height / 2, width, height, 4, C.dark, critical ? C.red : C.orange);
   if (state.phase === 'ready') {
-    text('HOLD SPACE, CLICK OR TOUCH TO VENT', x, y - 12, portrait ? 23 : 16, C.amber, 'center', 'bold');
-    text('PRESS TO START · ENTER STARTS WITHOUT VENTING', x, y + 15, portrait ? 17 : 12, C.text, 'center');
+    const start = touchUI() ? 'HOLD OR TAP ANYWHERE TO VENT' : 'HOLD SPACE OR CLICK TO VENT';
+    text(start, x, y - 12, portrait ? 23 : 16, C.amber, 'center', 'bold');
+    const help = touchUI() ? 'TOUCH TO START · RELEASE TO HEAT'
+      : 'PRESS TO START · ENTER STARTS WITHOUT VENTING';
+    text(help, x, y + 15, portrait ? 17 : 12, C.text, 'center');
   } else {
     text(label, x, y, portrait ? 22 : 15, critical ? C.red : C.amber, 'center', 'bold');
   }
@@ -1237,18 +1374,25 @@ function drawBatchStatus() {
   const progress = state.cookTime / target.seconds;
   rounded(x - width / 2, progressY, width, g.progressHeight, 2, C.seam);
   if (progress > 0) rounded(x - width / 2, progressY, width * progress, g.progressHeight, 2, C.amber);
-  text(`BATCH ${state.batchIndex + 1}/${CONFIG.batches.length} · ${state.cookTime.toFixed(1)}/${target.seconds}s IN ZONE · TARGET ${target.low}–${target.high}`,
-    x, progressY + g.captionGap, portrait ? 18 : 12, C.text, 'center');
+  const progressLabel = `BATCH ${state.batchIndex + 1}/${CONFIG.batches.length} · `
+    + `${state.cookTime.toFixed(1)}/${target.seconds}s IN ZONE · TARGET ${target.low}–${target.high}`;
+  text(progressLabel, x, progressY + g.captionGap, portrait ? 18 : 12, C.text, 'center');
 }
 
 function drawControlHint() {
-  const { w, h, portrait, footerY } = scene;
-  const y = portrait ? footerY : h - 39;
+  if (isResult() || state.hintOpacity <= 0) return;
+  // A dark plaque in the open wall space, clear of the floor console and lever.
+  const x = scene.w * (scene.portrait ? .46 : .14);
+  const y = scene.h * (scene.portrait ? .665 : .69);
+  const width = scene.portrait ? 470 : 300;
+  const hint = touchUI() ? 'HOLD / TAP ANYWHERE TO VENT'
+    : inputType === 'mouse' ? 'HOLD CLICK ANYWHERE TO VENT' : 'HOLD SPACE TO VENT';
   ctx.save();
   ctx.globalAlpha = state.hintOpacity;
-  text('Hold SPACE, click or touch anywhere to vent', w * .5, y, portrait ? 19 : 16, C.text, 'center');
+  rounded(x - width / 2, y - 21, width, 42, 4, C.dark, C.rim);
+  text(hint, x, y - 5, scene.portrait ? 18 : 14, C.text, 'center');
+  text('RELEASE TO HEAT', x, y + 12, 11, C.amber, 'center');
   ctx.restore();
-  text('RELEASE TO HEAT / 100 PSI = BLOWOUT', w * .5, y + (portrait ? 21 : 18), portrait ? 14 : 12, C.muted, 'center');
 }
 
 function drawHeader() {
@@ -1270,27 +1414,115 @@ function drawHeatReadout() {
   const x = scene.w * .79;
   const y = scene.h * .385;
   text('BOILER STATUS', x, y, 12, C.muted, 'center');
-  text(state.phase === 'cooking' ? '● FIRED UP' : state.phase === 'ready' ? '● STANDBY' : state.phase === 'gameover' ? '● VALVE BLOWN' : state.phase === 'victory' ? '● SERVICE DONE' : '● DISH READY', x, y + 27, 17, C.orange, 'center', 'bold');
+  const labels = {
+    cooking: '● FIRED UP',
+    ready: '● STANDBY',
+    gameover: '● VALVE BLOWN',
+    victory: '● SERVICE DONE',
+    batch: '● DISH READY'
+  };
+  text(labels[state.phase], x, y + 27, 17, C.orange, 'center', 'bold');
   text(`HEAT LV ${state.batchIndex + 1}  /  ${state.elapsed.toFixed(1)}s`, x, y + 54, 12, C.amber, 'center');
 }
 
 function drawGameOver() {
   if (!isResult() || state.resultTime < CONFIG.overlayDelay) return;
-  const won = state.phase === 'victory';
+  if (state.phase === 'victory') {
+    drawVictory();
+    return;
+  }
   const g = CONFIG.layout.overlay;
   const x = scene.w / 2;
   const y = scene.h / 2;
   ctx.fillStyle = 'rgba(13,9,8,.84)';
   ctx.fillRect(0, 0, scene.w, scene.h);
   rounded(x - g.w / 2, y - g.h / 2, g.w, g.h, 10, C.dark, C.orange, 2);
-  text(won ? 'ALL FIVE DISHES COOKED!' : `BATCH ${state.batchIndex + 1} · VALVE BLOWOUT`, x, y - 155, 18, C.orange, 'center', 'bold');
-  text(won ? 'SERVICE COMPLETE' : 'GAME OVER', x, y - 97, won ? 39 : 52, C.text, 'center', 'bold');
-  text(`${state.dishes}/${CONFIG.batches.length} dishes · ${state.elapsed.toFixed(1)}s service`, x, y - 48, 17, C.muted, 'center');
+  text(`BATCH ${state.batchIndex + 1} · VALVE BLOWOUT`, x, y - 155, 18, C.orange, 'center', 'bold');
+  text('GAME OVER', x, y - 97, 52, C.text, 'center', 'bold');
+  const summary = `${state.dishes}/${CONFIG.batches.length} dishes · ${state.elapsed.toFixed(1)}s service`;
+  text(summary, x, y - 48, 17, C.muted, 'center');
   text('FINAL SCORE', x - 125, y + 4, 13, C.amber, 'center');
   text('PERSONAL BEST', x + 125, y + 4, 13, C.amber, 'center');
   text(Math.floor(state.score).toString().padStart(6, '0'), x - 125, y + 43, 33, C.text, 'center', 'bold');
   text(state.best.toString().padStart(6, '0'), x + 125, y + 43, 33, C.text, 'center', 'bold');
-  if (!scene.portrait) text('or press SPACE / ENTER', x, y + 190, 13, C.muted, 'center');
+  text(touchUI() ? 'TAP TO PLAY AGAIN' : 'or press SPACE / ENTER',
+    x, y + 190, 13, C.muted, 'center');
+}
+
+// Victory has a warmer, wider layout and a continuing celebration of its own.
+function drawVictory() {
+  const g = CONFIG.layout.victory;
+  const x = scene.w / 2;
+  const y = scene.h / 2;
+  ctx.fillStyle = 'rgba(13,9,8,.46)';
+  ctx.fillRect(0, 0, scene.w, scene.h);
+  const glow = ctx.createRadialGradient(x, y, 20, x, y, g.w * .8);
+  glow.addColorStop(0, 'rgba(255,179,92,.45)');
+  glow.addColorStop(1, 'rgba(240,90,24,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, scene.w, scene.h);
+  drawVictorySparkles(x, y);
+  ctx.save();
+  ctx.shadowColor = C.amber;
+  ctx.shadowBlur = reducedMotion ? 12 : 28;
+  rounded(x - g.w / 2, y - g.h / 2, g.w, g.h, 20, '#3C2110', C.amber, 4);
+  ctx.restore();
+  text('SERVICE COMPLETE', x, y + g.titleY, 45, C.amber, 'center', 'bold');
+  text(`ALL FIVE DISHES COOKED · ${state.elapsed.toFixed(1)}s`,
+    x, y + g.titleY + 43, 17, C.text, 'center');
+  for (let i = 0; i < CONFIG.batches.length; i++) {
+    const lit = reducedMotion || state.resultTime - CONFIG.overlayDelay >= i * g.lightDelay;
+    drawServedDish(x + (i - 2) * g.dishSpacing, y + g.dishY, lit);
+  }
+  drawFinalScores(x, y + g.scoreY);
+  drawGasket(x + g.chefX, y + g.chefY, g.chefScale, true);
+  text('GASKET’S SPECIAL: FIVE FOR FIVE!', x + 65, y + 70, 15, C.amber, 'center', 'bold');
+  text(touchUI() ? 'TAP TO PLAY AGAIN' : 'PLAY AGAIN · SPACE / ENTER',
+    x + 45, y + 210, 14, C.text, 'center');
+}
+
+function drawFinalScores(x, y) {
+  const columns = [
+    { x: x - 125, label: 'FINAL SCORE', value: Math.floor(state.score) },
+    { x: x + 125, label: 'PERSONAL BEST', value: state.best }
+  ];
+  for (const column of columns) {
+    text(column.label, column.x, y, 13, C.amber, 'center');
+    text(String(column.value).padStart(6, '0'), column.x, y + 37, 33, C.text, 'center', 'bold');
+  }
+}
+
+function drawServedDish(x, y, lit) {
+  const radius = CONFIG.layout.victory.dishRadius;
+  local(x, y, 1, () => {
+    circle(0, 0, radius + 7, lit ? C.orange : C.dark, lit ? C.amber : C.steel, 3);
+    ctx.beginPath();
+    ctx.arc(0, radius * .15, radius * .7, Math.PI, Math.PI * 2);
+    ctx.fillStyle = lit ? C.amber : C.steel;
+    ctx.fill();
+    line([[-radius * .85, radius * .25], [radius * .85, radius * .25]],
+      lit ? C.text : C.rim, 4);
+    circle(0, -radius * .6, radius * .1, lit ? C.text : C.rim);
+  });
+}
+
+function drawVictorySparkles(x, y) {
+  const g = CONFIG.layout.victory;
+  const time = reducedMotion ? 1 : state.resultTime;
+  ctx.save();
+  for (let i = 0; i < g.sparkleCount; i++) {
+    const travel = (time * .17 + i * .137) % 1;
+    const angle = i * 2.4;
+    const distance = g.w * (.3 + travel * .5);
+    const px = x + Math.cos(angle) * distance;
+    const py = y + Math.sin(angle) * distance * .75;
+    ctx.globalAlpha = Math.sin(travel * Math.PI) * .7;
+    const color = i % 2 ? C.amber : C.orange;
+    line([[px - 5, py], [px + 5, py]], color, 3);
+    line([[px, py - 5], [px, py + 5]], color, 3);
+    if (i % 3 === 0) circle(px, py - 20, 10 + travel * 16, 'rgba(255,179,92,.12)');
+  }
+  ctx.restore();
 }
 
 function drawPressureBurst() {
@@ -1326,7 +1558,7 @@ function render() {
   }
   drawPod();
   drawLever();
-  drawGasket();
+  if (state.phase !== 'victory') drawGasket();
   drawSteam();
   ctx.restore();
   drawPressureBurst();
@@ -1354,6 +1586,7 @@ function frame(timestamp) {
   requestAnimationFrame(frame);
 }
 bindInput();
+updateInstructions();
 window.addEventListener('resize', resize);
 resize();
 requestAnimationFrame(frame);

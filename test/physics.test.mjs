@@ -30,6 +30,19 @@ advance(vented, 30, true);
 assert.equal(vented.pressure, 0, 'pressure clamps at zero');
 assert.ok(vented.velocity >= 0, 'no hidden negative momentum at zero');
 assert.ok(vented.lever <= 1 && vented.lever >= 0);
+// Equal observation windows isolate a short correction from a sustained pull.
+const tap = cooking();
+const hold = cooking();
+const unvented = cooking();
+for (const state of [tap, hold, unvented]) state.elapsed = 20;
+advance(tap, 0.15, true);
+advance(tap, 0.85, false);
+advance(hold, 1, true);
+advance(unvented, 1, false);
+const tapCorrection = unvented.pressure - tap.pressure;
+const holdCorrection = unvented.pressure - hold.pressure;
+assert.ok(tapCorrection > 0, 'a short tap makes a useful correction');
+assert.ok(tapCorrection < holdCorrection * 0.5, 'holding vents substantially harder than tapping');
 const scoring = cooking();
 scoring.pressure = 75;
 for (let i = 0; i < 5 * C.comboSeconds / C.step; i++) score(scoring, C.step);
@@ -67,18 +80,24 @@ function runPolicy(interval, policy) {
   const state = cooking();
   let nextDecision = 0;
   let held = false;
+  let minimumPressure = state.pressure;
   while (state.phase === 'cooking' && state.elapsed < 240) {
     if (state.elapsed >= nextDecision) {
       held = policy(state, held);
       nextDecision += interval;
     }
     step(state, C.step, held);
+    minimumPressure = Math.min(minimumPressure, state.pressure);
   }
-  return state;
+  return { ...state, minimumPressure };
 }
 const idle = runPolicy(1, () => false);
+const tapping = runPolicy(C.step, s => s.elapsed % 0.4 < 0.15);
 const reasonable = runPolicy(0.45, (s, held) => s.pressure > 83 ? true : s.pressure < 67 ? false : held);
 const expert = runPolicy(0.08, s => s.pressure + s.velocity * 0.5 > 76);
+assert.ok(idle.elapsed >= 8 && idle.elapsed <= 10, 'opening ignition gives 8–10 seconds before idle blowout');
+assert.ok(tapping.minimumPressure > 40, '150 ms taps every 400 ms never drain the boiler');
+assert.ok(tapping.elapsed > idle.elapsed * 2, 'repeated taps extend the initial run');
 assert.ok(reasonable.elapsed > idle.elapsed * 4, 'ordinary reactions substantially outperform idle play');
 assert.ok(reasonable.score > idle.score * 3);
 assert.ok(expert.elapsed > 90, 'expert can reach a long run');
@@ -86,6 +105,6 @@ assert.ok(expert.score > reasonable.score, 'anticipation rewards zone control');
 assert.ok(expert.elapsed < 200 && expert.phase === 'gameover', 'uncapped difficulty ends expert runs');
 assert.ok(expert.heat > reasonable.heat || expert.elapsed >= reasonable.elapsed - 10);
 console.log('Physics checks passed: rise, venting, inertia, clamps, scoring, combo, blowout, reset.');
-for (const [name, state] of [['idle', idle], ['reasonable', reasonable], ['expert', expert]]) {
+for (const [name, state] of [['idle', idle], ['tapping', tapping], ['reasonable', reasonable], ['expert', expert]]) {
   console.log(`${name}: ${state.elapsed.toFixed(1)}s, ${Math.floor(state.score)} points, final heat ${state.heat.toFixed(1)}`);
 }

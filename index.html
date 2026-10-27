@@ -523,9 +523,40 @@ function drawRoom() {
   for (let i = 0; i < 5; i++) drawPipeCollar(inset, top + (bottom - top) * i / 5);
   rounded(0, h * room.floorY, w, h * (1 - room.floorY), 0, C.dark, C.steel);
   for (let i = 0; i < room.columns; i++) line([[w / 2, h * room.floorY], [w * i / 6, h]], C.seam);
+  drawFloorConsole();
   drawRoomLights();
   drawWallInstruments();
   drawAmbientSteam();
+}
+
+// The portrait floor doubles as the boiler's return-line service console.
+function drawFloorConsole() {
+  if (!scene.portrait) return;
+  const { w, h } = scene;
+  const floor = h * CONFIG.layout.room.floorY;
+  const panelTop = floor + 12;
+  const panelHeight = h - panelTop - 12;
+  rounded(w * .035, panelTop, w * .93, panelHeight, 10, C.panel, C.rim, 3);
+  rounded(w * .05, panelTop + 10, w * .90, panelHeight - 20, 6, C.dark, C.seam, 2);
+  for (const side of [.075, .925]) {
+    rivet(w * side, panelTop + 22, 4);
+    rivet(w * side, h - 35, 4);
+    const grilleX = w * side - 20;
+    for (let i = 0; i < 7; i++) {
+      const y = panelTop + 48 + i * (panelHeight - 100) / 7;
+      rounded(grilleX, y, 40, 7, 3, C.black, C.steel, 1);
+    }
+  }
+  text('RETURN LINE / MANUAL REGULATION', w * .5, panelTop + 28, 17, C.amber, 'center', 'bold');
+  const meterWidth = w * .48;
+  rounded(w * .26, panelTop + 57, meterWidth, 19, 3, C.black, C.steel);
+  for (let i = 0; i < 18; i++) {
+    const lit = i < Math.round(state.lever * 18);
+    rounded(w * .26 + 5 + i * (meterWidth - 10) / 18, panelTop + 61,
+      (meterWidth - 10) / 18 - 4, 11, 1, lit ? C.amber : C.seam);
+  }
+  line([[w * .15, panelTop + 49], [w * .15, h - 26], [w * .29, h - 26]], C.steel, 7);
+  line([[w * .85, panelTop + 49], [w * .85, h - 26], [w * .71, h - 26]], C.steel, 7);
 }
 
 function drawRoomLights() {
@@ -557,7 +588,7 @@ function drawRoomLights() {
   if (portrait) {
     const instructionY = scene.podY + 300 * scene.unit;
     text('KEEP THE NEEDLE IN ORANGE', w * 0.5, instructionY, 19, C.amber, 'center', 'bold');
-    text('HOLD = COOL  /  RELEASE = HEAT', w * 0.5, instructionY + 32, 14, C.muted, 'center');
+    text('TAP = TRIM / HOLD = COOL / RELEASE = HEAT', w * 0.5, instructionY + 32, 14, C.muted, 'center');
   }
 }
 
@@ -676,7 +707,7 @@ function drawDial(r, psi, main) {
   arc(r * .79, pressureAngle(CONFIG.warningPSI), pressureAngle(CONFIG.maxPSI), C.red, r * .055);
   drawDialTicks(r);
   text(main ? 'POD PRESSURE' : 'THERMAL', 0, -r * .34, r * .075, C.muted, 'center');
-  text(`${psi.toFixed(0).padStart(2, '0')}`, 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
+  text(psi.toFixed(0), 0, r * .39, r * .25, main && state.inZone ? C.amber : C.text, 'center', 'bold');
   text('PSI', 0, r * .60, r * .085, C.muted, 'center');
   drawNeedle(r, psi, main);
   if (main) text(state.inZone ? `×${state.combo} COOKING` : '65 — 85', 0, r * .87, r * .08, C.amber, 'center');
@@ -776,7 +807,7 @@ function drawLever() {
     rivet(0, g.pivotY, 9);
     rounded(tip.x - 36, tip.y - 14, 72, 28, 10, isVenting() ? C.amber : C.orange, C.black, 4);
     text(state.lever > .5 ? 'VENTING' : 'HOLD TO VENT', 0, g.h / 2 + 27, scene.portrait ? 20 : 14, C.amber, 'center', 'bold');
-    text(scene.portrait ? '[ HOLD ]' : '[ SPACE ]', 0, g.h / 2 + 51, scene.portrait ? 17 : 13, C.muted, 'center');
+    text(scene.portrait ? 'TAP / HOLD' : '[ SPACE ]', 0, g.h / 2 + 51, scene.portrait ? 17 : 13, C.muted, 'center');
   });
 }
 

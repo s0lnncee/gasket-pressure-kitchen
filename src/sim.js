@@ -12,6 +12,9 @@ globalThis.KitchenPhysics = (() => {
     heatRamp: 0.09,
     heatAcceleration: 0.0012,
     ventForce: 37,
+    ventCurve: 2,
+    warmupSeconds: 10,
+    warmupHeat: 2.5,
     pressureResponse: 3.5,
     spring: 180,
     damping: 25,
@@ -68,11 +71,16 @@ globalThis.KitchenPhysics = (() => {
     state.elapsed += dt;
     // The quadratic ramp eventually overtakes the valve: no immortal steady state.
     state.heat = SETTINGS.heatBase + state.elapsed * SETTINGS.heatRamp + state.elapsed ** 2 * SETTINGS.heatAcceleration;
+    // A slow ignition gives a newcomer time to read before full heat arrives.
+    const ignition = Math.min(1, state.elapsed / SETTINGS.warmupSeconds);
+    state.heat *= SETTINGS.warmupHeat / SETTINGS.heatBase + (1 - SETTINGS.warmupHeat / SETTINGS.heatBase) * ignition;
     const surgePhase = state.elapsed % SETTINGS.surgeEvery;
     state.surge = surgePhase < SETTINGS.surgeDuration
       ? Math.sin(surgePhase / SETTINGS.surgeDuration * Math.PI) * (SETTINGS.surgeForce + state.elapsed * 0.025)
       : 0;
-    const targetVelocity = state.heat + state.surge - state.lever * SETTINGS.ventForce;
+    // Progressive valve opening: short pulls trim pressure; a full pull vents hard.
+    const cooling = state.lever ** SETTINGS.ventCurve * SETTINGS.ventForce;
+    const targetVelocity = state.heat + state.surge - cooling;
     state.velocity += (targetVelocity - state.velocity) * SETTINGS.pressureResponse * dt;
     state.pressure = Math.max(0, Math.min(SETTINGS.maxPSI, state.pressure + state.velocity * dt));
     if (state.pressure === 0) {

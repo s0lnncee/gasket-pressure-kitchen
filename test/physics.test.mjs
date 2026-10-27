@@ -163,6 +163,8 @@ function runPolicy(interval, policy) {
   }
   return { ...state, minimumPressure };
 }
+assert.deepEqual(Array.from(C.batches, target => target.seconds), [6.5, 6.5, 12, 12, 12],
+  'presentation changes preserve all batch durations');
 assert.ok(C.batches[0].seconds >= 6 && C.batches[0].seconds <= 7);
 assert.ok(C.batches[1].seconds >= 6 && C.batches[1].seconds <= 7);
 let randomSeed = 0x1234;

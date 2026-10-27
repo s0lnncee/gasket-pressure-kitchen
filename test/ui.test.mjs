@@ -103,11 +103,11 @@ function setup(width, height, blocked = false) {
   };
 }
 
-for (const [width, height] of [[1440, 900], [390, 844]]) {
+for (const [width, height] of [[1440, 900], [390, 844], [360, 740]]) {
   const ui = setup(width, height);
   const { run, tick, text, replay, mute } = ui;
   run('render()');
-  assert.ok(text.includes(width < height ? 'HOLD OR TAP ANYWHERE TO VENT' : 'HOLD SPACE OR CLICK TO VENT'));
+  assert.ok(text.includes(width < height ? 'HOLD OR TAP ANYWHERE TO VENT' : 'HOLD SPACE TO VENT'));
   assert.ok(text.includes('1/5'), 'burner readout includes its scale');
   if (width < height) {
     assert.ok(!text.some(label => /SPACE|ENTER/.test(label)), 'touch wording has no keyboard instructions');
@@ -214,9 +214,12 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
   assert.ok(text.includes('CRITICAL · VENT NOW · SURGE INCOMING'), 'critical pressure cannot hide the surge warning');
   // Mute cannot capture gameplay keys, and releasing Space cannot depend on focus.
   run('resetState();');
-  const beforeMute = mute.attributes['aria-pressed'];
+  const initialMute = mute.attributes['aria-pressed'];
+  const initialMode = run('inputType');
   mute.handlers.get('click')({detail:0});
-  assert.equal(mute.attributes['aria-pressed'], beforeMute, 'keyboard click never toggles Mute');
+  assert.notEqual(mute.attributes['aria-pressed'], initialMute, 'assistive click toggles Mute');
+  assert.equal(run('inputType'), initialMode, 'semantic click preserves the last control mode');
+  const beforeMute = mute.attributes['aria-pressed'];
   run("keydown({code:'Enter',repeat:false,target:mute,preventDefault(){}})");
   assert.equal(run('state.phase'), 'cooking', 'Enter on a focused mute button starts gameplay');
   run("keydown({code:'Space',repeat:false,target:mute,preventDefault(){}})");
@@ -255,11 +258,72 @@ for (const [width, height] of [[1440, 900], [390, 844]]) {
     'popup occupies a reserved line above the dial title');
   assert.ok(popup.y > -run('CONFIG.layout.pod.gaugeR') + fontSize(popup),
     'popup stays inside the dial, clear of the pod rim');
-  const hint = ui.labels.find(label => label.value === 'HOLD / TAP ANYWHERE TO VENT');
+  const hint = ui.labels.find(label => label.value === run('ventInstruction()'));
   assert.ok(hint.y + 30 < run('scene.h * CONFIG.layout.room.floorY'),
     'hint stays above the console');
   const result = `${width}×${height}: service won in ${winTime.toFixed(1)}s; idle blowout ${lossTime.toFixed(1)}s`;
   console.log(result + '; controls, labels, mute, hint and replay passed.');
+}
+// Layout regressions at the two judged mobile sizes, plus both desktop sizes.
+for (const [width, height] of [[1440, 900], [1280, 800], [390, 844], [360, 740]]) {
+  const ui = setup(width, height);
+  const { run, labels, replay, text } = ui;
+  run('render();');
+  const instruction = run('ventInstruction()');
+  assert.equal(text.filter(label => label === instruction).length, 2,
+    'the ready banner and hint use exactly the same instruction');
+  const fontSize = label => Number(label.font.match(/([.\d]+)px/)[1]);
+  const caution = labels.find(label => label.value === 'CAUTION / LIVE STEAM');
+  const caption = labels.find(label => label.value.startsWith('BATCH 1/5 ·'));
+  assert.ok(caution.y - fontSize(caution) / 2 > caption.y + fontSize(caption) / 2 + 20,
+    'caution sign has clear space below the progress caption');
+  const hint = labels.filter(label => label.value === instruction).at(-1);
+  if (width < height) {
+    const pipeY = run('scene.h * .65');
+    assert.ok(hint.y - 20 > pipeY + 30, 'mobile hint clears the horizontal pipe');
+  } else {
+    const hintRight = run('scene.w * CONFIG.layout.hint.wideX + CONFIG.layout.hint.wideWidth / 2');
+    const handleLeft = run(`scene.podX - (CONFIG.layout.pod.w / 2 + CONFIG.layout.pod.handleReach
+      + CONFIG.layout.pod.handleStroke / 2) * scene.unit`);
+    assert.ok(hintRight + 10 < handleLeft, 'desktop hint clears the left handle');
+  }
+  for (let index = 0; index < 5; index++) {
+    labels.length = 0;
+    run(`state.phase='cooking'; state.batchIndex=${index};
+      state.cookTime=KitchenPhysics.batch(state).seconds; render();`);
+    const seconds = run('KitchenPhysics.batch(state).seconds.toFixed(1)');
+    assert.ok(labels.some(label => label.value.includes(`${seconds}/${seconds}s IN ZONE`)),
+      'current and required cook time both use one decimal');
+  }
+  labels.length = 0;
+  run("state.phase='batch'; feedback('BATCH COOKED! +1 DISH',true); render();");
+  if (width < height) {
+    const popup = labels.find(label => label.value === 'BATCH COOKED! +1 DISH');
+    const tick = labels.find(label => label.value === '70');
+    const popupHalf = popup.value.length * fontSize(popup) * .6 / 2;
+    const tickHalf = tick.value.length * fontSize(tick) * .6 / 2;
+    assert.ok(popupHalf + 4 < tick.x - tickHalf, 'long mobile popup clears the side tick labels');
+  }
+  for (const phase of ['victory', 'gameover']) {
+    labels.length = 0;
+    run(`state.phase='${phase}'; state.resultTime=3; positionReplay(); render();`);
+    assert.ok(!labels.some(label => /TAP TO PLAY AGAIN|PLAY AGAIN ·/.test(label.value)),
+      'canvas does not duplicate or hide a replay label under the DOM button');
+    const box = run('replayPlacement()');
+    assert.equal(parseFloat(replay.style.width), box.width);
+    assert.equal(parseFloat(replay.style.height), box.height);
+    const estimatedTextWidth = replay.textContent.length * box.font * .62;
+    const padding = run('CONFIG.layout.replay.padding');
+    assert.ok(estimatedTextWidth + padding * 2 + 2 < box.width, 'replay label fits on one line');
+    const panelBottom = run(`(scene.h / 2
+      + (${phase === 'victory' ? 'victoryLayout()' : 'CONFIG.layout.overlay'}.h / 2)) * view.scale`);
+    assert.ok(box.top + box.height + 8 < panelBottom, 'replay button stays inside the result panel');
+    if (phase === 'victory' && width < height) {
+      const chefBottom = run(`(scene.h / 2 + victoryLayout().chefY
+        + 199 * victoryLayout().chefScale) * view.scale`);
+      assert.ok(box.top > chefBottom + 12, 'mobile replay button has breathing room below Gasket');
+    }
+  }
 }
 const focusCase = setup(1440, 900);
 focusCase.mute.focus();
@@ -271,6 +335,40 @@ focusCase.run("keydown({code:'Space',repeat:false,target:canvas,preventDefault()
 assert.equal(focusCase.run('input.space'), true, 'Space vents after clicking Mute');
 focusCase.run("keyup({code:'Space',target:replay,preventDefault(){throw Error('Native replay blocked')}})");
 assert.equal(focusCase.run('input.space'), false, 'Space release also clears input on Replay');
+// A tablet starts in touch mode; actual keys or mouse input take precedence afterward.
+const tablet = setup(390, 844);
+assert.equal(tablet.run('inputType'), 'touch');
+tablet.run("keydown({code:'Space',repeat:false,preventDefault(){}}); render();");
+assert.equal(tablet.run('touchUI()'), false);
+assert.ok(tablet.text.includes('[ SPACE ]'));
+assert.ok(tablet.mute.textContent.includes('· M'));
+tablet.run("keyup({code:'Space',preventDefault(){}});");
+tablet.text.length = 0;
+tablet.run("pointerdown({button:0,pointerId:1,pointerType:'mouse',preventDefault(){}}); render();");
+assert.equal(tablet.run('inputType'), 'mouse');
+assert.ok(tablet.text.includes('[ CLICK ]'));
+assert.ok(!tablet.text.includes('[ TOUCH ]'));
+tablet.run("releasePointer({pointerId:1});");
+tablet.text.length = 0;
+tablet.run("pointerdown({button:0,pointerId:2,pointerType:'touch',preventDefault(){}}); render();");
+assert.equal(tablet.run('touchUI()'), true);
+assert.ok(!tablet.text.some(label => /SPACE|ENTER/.test(label)));
+assert.ok(!tablet.mute.textContent.includes('· M'));
+// Browser key defaults are suppressed at both ends, without suppressing semantic clicks.
+const accessible = setup(390, 844);
+accessible.mute.handlers.get('click')({detail:0});
+assert.equal(accessible.mute.attributes['aria-pressed'], 'true');
+accessible.run(`
+  let prevented = 0;
+  for (const code of ['Enter', 'Space']) {
+    keydown({code, target:mute, repeat:false, preventDefault(){prevented++;}});
+    keyup({code, target:mute, preventDefault(){prevented++;}});
+  }
+`);
+assert.equal(accessible.run('prevented'), 4);
+assert.equal(accessible.mute.attributes['aria-pressed'], 'true');
+assert.equal(accessible.run('state.phase'), 'cooking');
+assert.equal(accessible.run('input.space'), false);
 const unsupported = setup(390, 844, true);
 unsupported.run("keydown({code:'Enter',repeat:false,preventDefault(){}}); Sound.toggle(); Sound.toggle();");
 unsupported.tick(1);

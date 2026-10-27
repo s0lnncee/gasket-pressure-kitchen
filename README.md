@@ -16,7 +16,8 @@ band with zero pressure velocity. Five dishes trigger **SERVICE COMPLETE**: an a
 served dishes lighting in sequence, and Gasket raising both arms. At **100 PSI**, the valve blows and the
 current batch is lost; Game Over uses a separate, darker presentation. Both results show dishes, final
 service score, best score and Play again. Score and cooking freeze at the result. The best score is saved
-locally when storage is available.
+locally when storage is available. The portrait victory layout stacks its message, celebrating Gasket and a
+compact, single-line replay button. Neither result draws a duplicate touch retry instruction behind that button.
 
 - **Keyboard:** hold Space to start and vent; Enter starts without venting. Release to heat. M toggles sound.
 - **Mouse:** click and hold anywhere on the canvas to start and vent; release to heat.
@@ -25,12 +26,16 @@ locally when storage is available.
 - **Replay:** click/tap Play again, or use Space/Enter on a keyboard after the result animation.
   The restart press does not vent; release and press again to vent.
 - **Mute:** click/tap the sound button or press M. Space/Enter never toggle mute, even when it has focus.
-  Clicking Mute returns focus to the game. The preference is saved when storage is available.
+  Pointer clicks and assistive activations both work. Clicking Mute returns focus to the game.
+  The preference is saved when storage is available.
 
 Control labels follow the last keyboard, mouse or touch input. The initial choice follows pointer capability.
-Touch interfaces omit keyboard shortcuts on start, hints, sound controls and result screens.
+Pointer capability sets only the initial mode. A tablet switches to keyboard or mouse wording after that input.
+When touch is the last input, start, hints, sound controls and result screens omit keyboard shortcuts.
 The first-vent hint stays after an Enter-only start, occupies a separate wall plaque, and hides at either result.
-Combo and batch feedback have a reserved line inside the dial rather than sitting on the pod edge.
+Combo and batch feedback have a reserved line inside the dial, with smaller mobile text clear of the ticks.
+The hint clears the wall piping and the pod handle; the caution sign sits below the progress caption.
+Cook timers use one decimal on both sides, such as 6.5/6.5s and 12.0/12.0s.
 Space release always clears the held input, even if focus moves to a button. Window blur and hiding the
 page release all keyboard and pointer inputs.
 
@@ -66,6 +71,8 @@ an expert completion within 55–65 seconds. Deterministic policy results:
 
 These are scripted benchmarks, not human play measurements. UI smoke tests run both inline scripts with
 mocked Canvas, DOM and audio. They exercise keyboard and touch services, mute focus, button-focused Space
-release, blur/visibility release, input-specific wording, hint timing, sequential victory lights and replay.
+release, blur/visibility release, actual-input overrides on tablets, assistive mute activation, counter formatting,
+hint timing, sequential victory lights and replay. Layout checks cover 390×844 and 360×740 mobile results,
+button/chef separation, hint/pipe clearance and popup density, plus both desktop sizes.
 They also enforce the 120-character source-line limit. Real browser pixels and audible quality need separate
 review; mocks cannot verify them.

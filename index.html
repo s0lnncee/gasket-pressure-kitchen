@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0D0908">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Gasket’s Last Shift · Pressure Kitchen</title>
+  <style>:root { background: #0D0908; color: #F3EEE9; --heat: #F05A18; }</style>
+  <link rel="stylesheet" href="style.css">
+  <script src="engine.js" defer></script>
+  <script src="renderer.js" defer></script>
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <span class="wordmark"><span aria-hidden="true">◉</span> GASKET<span class="dot">.</span></span>
+      <span class="station-label eyebrow">PRESSURE KITCHEN / NIGHT CREW</span>
+      <div class="header-actions"><button id="sound" class="quiet-button" aria-pressed="false" type="button">Sound off</button><button id="pause" class="quiet-button" type="button" disabled>Pause Ⅱ</button></div>
+    </header>
+    <section class="intro" aria-labelledby="title"><div><p class="eyebrow">ONE POD. THREE ORDERS. NO SECOND CHANCES.</p><h1 id="title">The last <span>shift.</span></h1></div><p class="intro-copy">Keep your cool. Feed the night crew.<br><strong>Hold to vent. Release to heat.</strong></p></section>
+    <section id="console" class="console" aria-label="Pressure kitchen game" data-zone="idle" data-state="ready">
+      <div class="shift-strip">
+        <ol id="order-steps" aria-label="Orders"><li aria-current="step"><span>01</span> BROTH</li><li><span>02</span> DUMPLINGS</li><li><span>03</span> LAST SUPPER</li></ol>
+        <div class="score-block"><span class="eyebrow">SCORE</span><strong id="score">0000</strong></div>
+        <div class="best-block"><span class="eyebrow">BEST</span><strong id="best">0000</strong></div>
+      </div>
+      <div class="order-ticket">
+        <div class="ticket-copy"><span class="eyebrow" id="order-number">ORDER 01 / 03</span><h2 id="order-name">Midnight broth</h2></div>
+        <div class="recipe-progress"><div><span id="objective">15 seconds at 65–85 PSI</span><strong id="progress-text">0.0 / 15s</strong></div><progress id="cook-progress" max="15" value="0" aria-label="Time cooked in the sweet spot"></progress></div>
+        <span id="intensity" class="heat-chip">Ⅰ GENTLE HEAT</span>
+      </div>
+      <div class="play-area">
+        <div class="viewport">
+          <div class="viewport-label"><span class="eyebrow">VESSEL 01 / GASKET</span><span id="feed-status">● STANDING BY</span></div>
+          <canvas id="kitchen" width="800" height="540" role="img" aria-label="Copper cooking pod with a live 0–100 PSI gauge. Space or the lever vents steam.">Your browser needs Canvas support. Pressure and controls are also available beside the illustration.</canvas>
+          <div class="gasket-caption"><span class="caption-tag">GASKET</span><span id="gasket-line">“Three orders left. Then we clock out.”</span></div>
+          <div id="moment" class="moment" aria-hidden="true"></div>
+        </div>
+        <aside class="controls" aria-label="Pressure and steam controls">
+          <div class="instrument">
+            <div class="control-heading"><span class="eyebrow">VESSEL PRESSURE</span><span id="danger-label">100 PSI MAX</span></div>
+            <div class="pressure-value"><span id="pressure">55</span><span>PSI</span><span id="pressure-trend" aria-hidden="true">—</span></div>
+            <div id="pressure-meter" class="pressure-meter" role="meter" aria-label="Vessel pressure; target 65 to 85 PSI" aria-valuemin="0" aria-valuemax="100" aria-valuenow="55"><div class="target-band"></div><div id="meter-needle"></div></div>
+            <div class="scale" aria-hidden="true"><span>0</span><span>65</span><span>85</span><span>100</span></div>
+            <p id="status" class="pressure-status" role="status">READY WHEN YOU ARE</p>
+            <p id="advice" class="advice">Start your shift to light the burner.</p>
+          </div>
+          <div class="lever-assembly"><div class="lever-label"><span class="eyebrow">STEAM RELEASE</span><span id="valve-state">CLOSED</span></div>
+            <button id="lever" class="lever" type="button" aria-label="Hold to vent steam" aria-pressed="false" aria-describedby="lever-help" disabled><span class="lever-track" aria-hidden="true"><span class="lever-arm"></span><span class="lever-handle"></span></span><span class="lever-caption">HOLD TO VENT <span aria-hidden="true">↓</span></span></button>
+            <p id="lever-help" class="key-hint"><kbd>SPACE</kbd> or press & hold</p>
+          </div>
+          <p class="target-note"><strong>65–85 PSI = COOKING</strong><br>Outside the zone? Your progress waits.<br>100 PSI ends the shift.</p>
+        </aside>
+      </div>
+      <section id="overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="overlay-title" aria-describedby="overlay-detail">
+        <div class="overlay-card">
+          <span class="overlay-mark" id="overlay-mark" aria-hidden="true">◉</span>
+          <p class="eyebrow" id="overlay-kicker">THE NIGHT CREW IS COUNTING ON YOU</p>
+          <h2 id="overlay-title">Gasket’s<br><em>last shift.</em></h2>
+          <canvas id="dish-art" width="220" height="80" aria-hidden="true" hidden></canvas>
+          <p id="overlay-detail">Three orders before sunrise. Keep the pressure at 65–85 PSI to cook. At 100, the valve blows.</p>
+          <div id="how-to" class="how-to"><span><b>HOLD</b> Space or lever to vent</span><span><b>RELEASE</b> to build pressure</span></div>
+          <div id="result" class="result" hidden><div><span id="result-label" class="eyebrow">FINAL SCORE</span><strong id="final-score">0</strong></div><p id="result-detail"></p></div>
+          <p id="next-preview" class="next-preview" hidden></p>
+          <button id="primary" class="primary-button" type="button">Start shift <span aria-hidden="true">↗</span></button>
+          <button id="secondary" class="text-button" type="button" hidden>Play again</button>
+          <p id="overlay-note" class="overlay-note">First order: 15 seconds in the zone. Take your time.</p>
+        </div>
+      </section>
+    </section>
+    <footer><span>BUILT FOR THE HEAT.</span><span>10 PTS / SECOND IN ZONE + SERVICE BONUS</span><span><kbd>P</kbd> PAUSE · SOUND OPTIONAL</span></footer>
+    <noscript><p>Enable JavaScript to start your shift.</p></noscript>
+  </main>
+</body>
+</html>

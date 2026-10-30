@@ -1,0 +1,7 @@
+{
+  "name": "gaskets-pressure-kitchen",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A dependency-free Canvas pressure-control game",
+  "scripts": { "test": "node --test tests/engine.test.cjs" }
+}
